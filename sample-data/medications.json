@@ -1,0 +1,25 @@
+{
+  "resourceType": "MedicationRequest",
+  "id": "medication-001",
+  "status": "active",
+  "intent": "order",
+  "medicationCodeableConcept": {
+    "coding": [
+      {
+        "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+        "code": "860975",
+        "display": "Metformin 1000 MG Oral Tablet"
+      }
+    ],
+    "text": "Metformin 1000mg"
+  },
+  "subject": {
+    "reference": "Patient/patient-001"
+  },
+  "authoredOn": "2023-01-15",
+  "dosageInstruction": [
+    {
+      "text": "Take 1 tablet by mouth twice daily with meals"
+    }
+  ]
+}

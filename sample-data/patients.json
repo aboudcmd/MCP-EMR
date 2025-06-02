@@ -1,0 +1,32 @@
+{
+  "resourceType": "Patient",
+  "id": "patient-001",
+  "identifier": [
+    {
+      "system": "http://hospital.example.org/patients",
+      "value": "MRN001"
+    }
+  ],
+  "name": [
+    {
+      "family": "Smith",
+      "given": ["John", "Michael"]
+    }
+  ],
+  "gender": "male",
+  "birthDate": "1980-05-15",
+  "telecom": [
+    {
+      "system": "phone",
+      "value": "555-123-4567"
+    }
+  ],
+  "address": [
+    {
+      "line": ["123 Main St"],
+      "city": "Boston",
+      "state": "MA",
+      "postalCode": "02101"
+    }
+  ]
+}
