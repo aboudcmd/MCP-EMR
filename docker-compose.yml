@@ -1,12 +1,12 @@
 version: '3.8'
 
 services:
-  # PostgreSQL for FHIR Server (start this first)
+  # PostgreSQL for FHIR Server
   fhir-db:
     image: postgres:15
     container_name: emr-fhir-db
     ports:
-      - "5432:5432"  # Expose PostgreSQL port for debugging
+      - "5432:5432"
     environment:
       - POSTGRES_DB=hapi
       - POSTGRES_USER=hapiuser
@@ -28,39 +28,29 @@ services:
     ports:
       - "8081:8080"
     environment:
-      # Fix the driver class name
       - spring.datasource.driver-class-name=org.postgresql.Driver
       - spring.datasource.url=jdbc:postgresql://fhir-db:5432/hapi
       - spring.datasource.username=hapiuser
       - spring.datasource.password=hapipass
-      # Remove or update the dialect
       - spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
-      # Fix the server address to match the exposed port
       - hapi.fhir.server_address=http://localhost:8081/fhir
-      # Add these to ensure proper initialization
       - spring.jpa.hibernate.ddl-auto=update
       - spring.datasource.max-active=15
+      - hapi.fhir.allow_external_references=true
+      - hapi.fhir.cors.allowed_origin=*
     depends_on:
       fhir-db:
         condition: service_healthy
     networks:
       - emr-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/fhir/metadata"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
-  # MCP Server
-  mcp-server:
-    build: ./mcp-server
-    container_name: emr-mcp-server
-    environment:
-      - FHIR_SERVER_URL=http://fhir-server:8080/fhir
-      - NODE_ENV=production
-    depends_on:
-      - fhir-server
-    networks:
-      - emr-network
-    restart: unless-stopped
-
-  # Backend API
+  # Backend API (development mode - comment out for local dev)
   backend-api:
     build: ./backend-api
     container_name: emr-backend-api
@@ -70,25 +60,22 @@ services:
       - PORT=3001
       - NODE_ENV=production
       - GROQ_API_KEY=${GROQ_API_KEY}
-      - MCP_SERVER_PATH=/app/mcp-server
+      - FHIR_SERVER_URL=http://fhir-server:8080/fhir
       - CORS_ORIGIN=http://localhost:3000
-    volumes:
-      - ./mcp-server/dist:/app/mcp-server:ro
     depends_on:
-      - mcp-server
       - fhir-server
     networks:
       - emr-network
     restart: unless-stopped
 
-  # Frontend
+  # Frontend (development mode - comment out for local dev)
   frontend:
     build: ./frontend
     container_name: emr-frontend
     ports:
       - "3000:80"
     environment:
-      - VITE_API_URL=http://localhost:3001
+      - VITE_API_URL=/api
     depends_on:
       - backend-api
     networks:

@@ -15,12 +15,20 @@ const PORT = process.env.PORT || 3001;
 app.use(helmet());
 app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  credentials: true,  // Add this for cookie support if needed
 }));
 app.use(express.json());
 
 // Health check
 app.get('/health', (req: express.Request, res: express.Response) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    services: {
+      backend: 'running',
+      port: PORT
+    }
+  });
 });
 
 // Routes
@@ -31,4 +39,5 @@ app.use(errorHandler);
 
 app.listen(PORT, () => {
   logger.info(`Backend API running on port ${PORT}`);
+  logger.info(`CORS enabled for: ${process.env.CORS_ORIGIN || 'http://localhost:3000'}`);
 });
