@@ -1,90 +1,69 @@
 version: '3.8'
 
 services:
-  # PostgreSQL for FHIR Server
+  # PostgreSQL Database for FHIR
   fhir-db:
-    image: postgres:15
-    container_name: emr-fhir-db
-    ports:
-      - "5432:5432"
+    image: postgres:14
     environment:
-      - POSTGRES_DB=hapi
-      - POSTGRES_USER=hapiuser
-      - POSTGRES_PASSWORD=hapipass
+      POSTGRES_DB: hapi
+      POSTGRES_USER: hapi
+      POSTGRES_PASSWORD: hapi
     volumes:
       - fhir-data:/var/lib/postgresql/data
-    networks:
-      - emr-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hapiuser -d hapi"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    ports:
+      - "5432:5432"
 
-  # FHIR Server
+  # HAPI FHIR Server
   fhir-server:
     image: hapiproject/hapi:latest
-    container_name: emr-fhir-server
+    environment:
+      spring.datasource.url: jdbc:postgresql://fhir-db:5432/hapi
+      spring.datasource.username: hapi
+      spring.datasource.password: hapi
+      spring.datasource.driverClassName: org.postgresql.Driver
+      spring.jpa.properties.hibernate.dialect: ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgres94Dialect
+      hapi.fhir.enable_repository_validating_interceptor: 'false'
     ports:
       - "8081:8080"
-    environment:
-      - spring.datasource.driver-class-name=org.postgresql.Driver
-      - spring.datasource.url=jdbc:postgresql://fhir-db:5432/hapi
-      - spring.datasource.username=hapiuser
-      - spring.datasource.password=hapipass
-      - spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
-      - hapi.fhir.server_address=http://localhost:8081/fhir
-      - spring.jpa.hibernate.ddl-auto=update
-      - spring.datasource.max-active=15
-      - hapi.fhir.allow_external_references=true
-      - hapi.fhir.cors.allowed_origin=*
     depends_on:
-      fhir-db:
-        condition: service_healthy
-    networks:
-      - emr-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/fhir/metadata"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      - fhir-db
 
-  # Backend API (development mode - comment out for local dev)
+  # Python MCP Server
+  mcp-server:
+    build: ./mcp-server-python
+    environment:
+      FHIR_SERVER_URL: http://fhir-server:8080/fhir
+    env_file:
+      - .env
+    depends_on:
+      - fhir-server
+
+  # Python Backend API
   backend-api:
-    build: ./backend-api
-    container_name: emr-backend-api
+    build: ./backend-api-python
     ports:
       - "3001:3001"
     environment:
-      - PORT=3001
-      - NODE_ENV=production
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - FHIR_SERVER_URL=http://fhir-server:8080/fhir
-      - CORS_ORIGIN=http://localhost:3000
+      MCP_SERVER_PATH: /app/mcp_server/main.py
+      FHIR_SERVER_URL: http://fhir-server:8080/fhir
+      CORS_ORIGIN: http://localhost:3000
+    env_file:
+      - .env
     depends_on:
+      - mcp-server
       - fhir-server
-    networks:
-      - emr-network
-    restart: unless-stopped
+    volumes:
+      - ./mcp-server-python:/app/mcp_server:ro
 
-  # Frontend (development mode - comment out for local dev)
+  # React Frontend
   frontend:
     build: ./frontend
-    container_name: emr-frontend
     ports:
       - "3000:80"
     environment:
-      - VITE_API_URL=/api
+      VITE_API_URL: http://localhost:3001
     depends_on:
       - backend-api
-    networks:
-      - emr-network
-    restart: unless-stopped
 
 volumes:
   fhir-data:
-
-networks:
-  emr-network:
-    driver: bridge
