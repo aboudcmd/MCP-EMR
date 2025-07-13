@@ -4,66 +4,115 @@ services:
   # PostgreSQL Database for FHIR
   fhir-db:
     image: postgres:14
+    container_name: emr-fhir-db
     environment:
-      POSTGRES_DB: hapi
-      POSTGRES_USER: hapi
+      POSTGRES_DB:       hapi
+      POSTGRES_USER:     hapi
       POSTGRES_PASSWORD: hapi
     volumes:
       - fhir-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    networks:
+      - emr-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hapi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # HAPI FHIR Server
   fhir-server:
     image: hapiproject/hapi:latest
+    container_name: emr-fhir-server
     environment:
-      spring.datasource.url: jdbc:postgresql://fhir-db:5432/hapi
-      spring.datasource.username: hapi
-      spring.datasource.password: hapi
-      spring.datasource.driverClassName: org.postgresql.Driver
-      spring.jpa.properties.hibernate.dialect: ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgres94Dialect
-      hapi.fhir.enable_repository_validating_interceptor: 'false'
+      # JDBC connection
+      SPRING_DATASOURCE_URL:                 "jdbc:postgresql://fhir-db:5432/hapi"
+      SPRING_DATASOURCE_USERNAME:            "hapi"
+      SPRING_DATASOURCE_PASSWORD:            "hapi"
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME:   "org.postgresql.Driver"
+      # Auto‐schema update & SQL logging
+      SPRING_JPA_HIBERNATE_DDL_AUTO:         "update"
+      SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: "ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgresDialect"
+      SPRING_JPA_SHOW_SQL:                   "true"
+      SPRING_JPA_PROPERTIES_FORMAT_SQL:      "true"
+      HAPI_FHIR_ENABLE_REPOSITORY_VALIDATING_INTERCEPTOR: "false"
     ports:
       - "8081:8080"
     depends_on:
-      - fhir-db
+      fhir-db:
+        condition: service_healthy
+    networks:
+      - emr-network
+    restart: unless-stopped
 
   # Python MCP Server
   mcp-server:
     build: ./mcp-server-python
-    environment:
-      FHIR_SERVER_URL: http://fhir-server:8080/fhir
+    container_name: emr-mcp-server
     env_file:
       - .env
+    environment:
+      # point at the in-Docker FHIR server
+      FHIR_SERVER_URL: http://fhir-server:8080/fhir
     depends_on:
       - fhir-server
+    networks:
+      - emr-network
 
   # Python Backend API
   backend-api:
     build: ./backend-api-python
+    container_name: emr-backend-api
     ports:
       - "3001:3001"
-    environment:
-      MCP_SERVER_PATH: /app/mcp_server/main.py
-      FHIR_SERVER_URL: http://fhir-server:8080/fhir
-      CORS_ORIGIN: http://localhost:3000
     env_file:
       - .env
+    environment:
+      # point at the in-Docker MCP server & FHIR server
+      MCP_SERVER_PATH: /app/mcp_server/main.py
+      FHIR_SERVER_URL: http://fhir-server:8080/fhir
+      CORS_ORIGIN:    http://localhost:3000
     depends_on:
       - mcp-server
       - fhir-server
     volumes:
       - ./mcp-server-python:/app/mcp_server:ro
+    networks:
+      - emr-network
 
   # React Frontend
   frontend:
     build: ./frontend
+    container_name: emr-frontend
     ports:
       - "3000:80"
+    env_file:
+      - .env
     environment:
-      VITE_API_URL: http://localhost:3001
+      # point at the in-Docker backend
+      VITE_API_URL: http://backend-api:3001
     depends_on:
       - backend-api
+    networks:
+      - emr-network
+
+  # Adminer - Postgres GUI
+  adminer:
+    image: adminer
+    container_name: emr-adminer
+    ports:
+      - "8082:8080"
+    depends_on:
+      - fhir-db
+    environment:
+      ADMINER_DEFAULT_SERVER: fhir-db
+    networks:
+      - emr-network
 
 volumes:
   fhir-data:
+
+networks:
+  emr-network:
+    driver: bridge

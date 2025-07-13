@@ -21,7 +21,7 @@ class GroqClient:
                 ],
                 "tools": tools,
                 "tool_choice": "auto",
-                "temperature": 0.3,
+                "temperature": 0,
                 "max_tokens": 1024,
             }
             
@@ -38,7 +38,7 @@ class GroqClient:
             payload = {
                 "model": "llama-3.3-70b-versatile",
                 "messages": messages + tool_results,
-                "temperature": 0.3,
+                "temperature": 0,
                 "max_tokens": 1024,
             }
             
