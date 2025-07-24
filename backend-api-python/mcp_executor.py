@@ -1,3 +1,4 @@
+# backend-api-python/mcp_executor.py
 import asyncio
 import json
 import logging
@@ -18,6 +19,8 @@ class MCPExecutor:
                 args_dict = json.loads(args)
             else:
                 args_dict = args
+            
+            logger.info(f"Executing tool {tool_name} with args: {args_dict}")
             
             # Prepare the request
             request = {
@@ -45,16 +48,31 @@ class MCPExecutor:
             
             if process.returncode != 0:
                 error_msg = stderr.decode() if stderr else "Unknown error"
-                raise Exception(f"MCP process exited with code {process.returncode}: {error_msg}")
+                logger.error(f"MCP process exited with code {process.returncode}: {error_msg}")
+                raise Exception(f"MCP process error: {error_msg}")
             
             # Parse response
-            response = json.loads(stdout.decode())
+            try:
+                response = json.loads(stdout.decode())
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse MCP response: {stdout.decode()}")
+                raise Exception(f"Invalid MCP response: {e}")
             
             if "error" in response:
-                raise Exception(f"MCP error: {response['error']['message']}")
+                logger.error(f"MCP returned error: {response['error']}")
+                raise Exception(f"MCP error: {response['error'].get('message', 'Unknown error')}")
             
-            return response.get("result", {})
+            result = response.get("result", {})
+            
+            # Log result summary (truncate for readability)
+            result_str = json.dumps(result)
+            if len(result_str) > 200:
+                logger.info(f"Tool {tool_name} returned: {result_str[:200]}...")
+            else:
+                logger.info(f"Tool {tool_name} returned: {result_str}")
+            
+            return result
             
         except Exception as e:
-            logger.error(f"MCP executor error: {e}")
+            logger.error(f"MCP executor error for {tool_name}: {e}", exc_info=True)
             raise

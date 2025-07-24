@@ -1,17 +1,21 @@
+# backend-api-python/main.py
 import os
+import json  # <-- This import was missing!
+import logging
+import asyncio
 from pathlib import Path
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
-import logging
-from datetime import datetime
 
 from groq_client import GroqClient
 from mcp_executor import MCPExecutor
 
-# Load environment variables from root directory
+# Load environment variables
 root_dir = Path(__file__).parent.parent
 load_dotenv(root_dir / '.env')
 
@@ -40,7 +44,7 @@ mcp_executor = MCPExecutor(
     mcp_server_path=os.getenv("MCP_SERVER_PATH", "../mcp-server-python/main.py")
 )
 
-# Define request/response models
+# Request/Response models
 class Message(BaseModel):
     role: str
     content: str
@@ -59,12 +63,12 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_patients",
-            "description": "Search for patients by name, identifier, or other criteria",
+            "description": "Search for patients by name, identifier, or other criteria. Leave parameters empty to get all patients.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Patient name to search for"},
-                    "identifier": {"type": "string", "description": "Patient identifier"},
+                    "identifier": {"type": "string", "description": "Patient identifier/MRN"},
                     "birthDate": {"type": "string", "description": "Birth date (YYYY-MM-DD)"},
                     "gender": {"type": "string", "enum": ["male", "female", "other"]},
                 },
@@ -169,25 +173,23 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = """You are an EMR (Electronic Medical Records) assistant with access to a FHIR server through tools. You help healthcare providers query patient data, medical records, conditions, medications, and more.
+SYSTEM_PROMPT = """You are an EMR (Electronic Medical Records) assistant with access to a FHIR server through tools.
 
-Available tools:
-- search_patients: Search for patients by name, identifier, birth date, or gender
-- get_patient_details: Get detailed information about a specific patient
-- get_patient_conditions: Get all conditions/diagnoses for a patient
-- get_patient_medications: Get current medications for a patient
-- get_patient_observations: Get observations (vitals, lab results) for a patient
-- get_patient_encounters: Get encounters/visits for a patient
-- get_patient_allergies: Get allergy information for a patient
+CRITICAL RULES:
+1. NEVER make up or hallucinate patient data
+2. ALWAYS use tools to retrieve actual data from the FHIR server
+3. If you need patient information, you MUST call the appropriate tool and wait for results
+4. Only provide information that comes from tool results
+5. If no data is found, say "No data found" rather than making up information
 
-When users ask questions:
-1. Understand their intent and determine which tools to use
-2. Use the appropriate tools to query the FHIR server
-3. Present the information in a clear, clinically relevant format
-4. Maintain patient privacy and HIPAA compliance
-5. If multiple queries are needed, execute them in a logical order
+When users ask for medical information:
+- First, identify what data is needed
+- Call the appropriate tool(s)
+- Wait for the tool results
+- ONLY use the data from tool results in your response
+- If the tool returns no data, inform the user that no data was found
 
-Always be helpful, accurate, and provide relevant medical context when appropriate. Format responses clearly with bullet points or sections when presenting multiple pieces of information."""
+Remember: You must NEVER provide medical data unless it comes from a tool result. Always be helpful and format responses clearly."""
 
 @app.get("/health")
 async def health_check():
@@ -207,8 +209,17 @@ async def chat(request: ChatRequest):
     try:
         logger.info(f"Received chat request: {request.message}")
         
-        # Format messages for Groq
-        messages = [msg.dict() for msg in request.conversationHistory]
+        # Build conversation history
+        messages = []
+        
+        # Add system prompt
+        messages.append({"role": "system", "content": SYSTEM_PROMPT})
+        
+        # Add conversation history
+        for msg in request.conversationHistory:
+            messages.append({"role": msg.role, "content": msg.content})
+        
+        # Add current user message
         messages.append({"role": "user", "content": request.message})
         
         # Get initial response from Groq with tools
@@ -219,36 +230,66 @@ async def chat(request: ChatRequest):
         if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
             logger.info(f"Executing {len(response_message.tool_calls)} tool calls")
             
-            # Execute each tool call
-            tool_results = []
+            # Add the assistant's message with tool calls to the conversation
+            assistant_msg = {
+                "role": "assistant",
+                "content": response_message.content or "",
+                "tool_calls": []
+            }
+            
+            # Format tool calls properly
+            for tc in response_message.tool_calls:
+                assistant_msg["tool_calls"].append({
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    }
+                })
+            
+            messages.append(assistant_msg)
+            
+            # Execute each tool call and collect results
             for tool_call in response_message.tool_calls:
                 try:
+                    logger.info(f"Executing tool: {tool_call.function.name}")
+                    
+                    # Execute the tool
                     result = await mcp_executor.execute_tool(
                         tool_call.function.name,
                         tool_call.function.arguments
                     )
                     
-                    tool_results.append({
+                    # Add tool result to messages
+                    # Add tool result to messages
+                    tool_result_msg = {
                         "role": "tool",
-                        "content": str(result),
+                        "content": json.dumps(result),  # Convert result to JSON string
                         "tool_call_id": tool_call.id,
-                    })
+                    }
+                    messages.append(tool_result_msg)
+                   
                 except Exception as e:
                     logger.error(f"Tool execution error for {tool_call.function.name}: {e}")
-                    tool_results.append({
+                    # Add error as tool result
+                    error_msg = {
                         "role": "tool",
-                        "content": f"Error: {str(e)}",
+                        "content": json.dumps({"error": str(e)}),
                         "tool_call_id": tool_call.id,
-                    })
-            
-            # Get final response with tool results
-            final_messages = messages + [response_message.dict()] + tool_results
-            final_response = await groq_client.complete_with_tool_results(final_messages, [])
+                    }
+                    messages.append(error_msg)
+           
+           # Get final response from Groq with tool results
+           # Important: Don't pass tools this time to force response generation
+            final_response = await groq_client.chat(messages, [], SYSTEM_PROMPT)
             final_message = final_response.choices[0].message
-            
+           
+           # Return the response
             return ChatResponse(
                 response=final_message.content,
-                conversationHistory=messages + [
+                conversationHistory=request.conversationHistory + [
+                    Message(role="user", content=request.message),
                     Message(role="assistant", content=final_message.content)
                 ]
             )
@@ -256,16 +297,17 @@ async def chat(request: ChatRequest):
             # No tools needed, return direct response
             return ChatResponse(
                 response=response_message.content,
-                conversationHistory=messages + [
+                conversationHistory=request.conversationHistory + [
+                    Message(role="user", content=request.message),
                     Message(role="assistant", content=response_message.content)
                 ]
             )
-            
+           
     except Exception as e:
-        logger.error(f"Chat error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to process chat request")
+        logger.error(f"Chat error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to process chat request: {str(e)}")
 
 if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 3001))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+   import uvicorn
+   port = int(os.getenv("PORT", 3001))
+   uvicorn.run(app, host="0.0.0.0", port=port)
