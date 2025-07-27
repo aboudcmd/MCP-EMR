@@ -23,7 +23,7 @@ class GroqClient:
             
             # Build the request payload
             payload = {
-                "model": "llama-3.3-70b-versatile",
+                "model": "moonshotai/kimi-k2-instruct",
                 "messages": messages,
                 "temperature": 0,
                 "max_tokens": 1024,
@@ -45,7 +45,7 @@ class GroqClient:
         """Complete conversation with tool results"""
         try:
             payload = {
-                "model": "llama-3.3-70b-versatile",
+                "model": "moonshotai/kimi-k2-instruct",
                 "messages": messages + tool_results,
                 "temperature": 0,
                 "max_tokens": 1024,
