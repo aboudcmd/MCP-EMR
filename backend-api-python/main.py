@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from groq_client import GroqClient
@@ -51,7 +51,10 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    conversationHistory: List[Message] = []
+    conversationHistory: List[Message] = Field(
+        default=[],
+        description="Full conversation history for context. Send all previous messages to maintain conversation state."
+    )
 
 class ChatResponse(BaseModel):
     response: str
@@ -63,14 +66,18 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_patients",
-            "description": "Search for patients by name, identifier, or other criteria. Leave parameters empty to get all patients.",
+            "description": "Search for patients in Saudi healthcare system. Supports name, MRN, National ID, Iqama, and other criteria.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Patient name to search for"},
-                    "identifier": {"type": "string", "description": "Patient identifier/MRN"},
+                    "mrn": {"type": "string", "description": "Medical Record Number (MRN)"},
+                    "nationalId": {"type": "string", "description": "Saudi National ID number"},
+                    "iqama": {"type": "string", "description": "Iqama number for residents"},
                     "birthDate": {"type": "string", "description": "Birth date (YYYY-MM-DD)"},
                     "gender": {"type": "string", "enum": ["male", "female", "other"]},
+                    "phone": {"type": "string", "description": "Phone number"},
+                    "email": {"type": "string", "description": "Email address"},
                 },
             },
         },

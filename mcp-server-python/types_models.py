@@ -3,9 +3,13 @@ from typing import Optional
 
 class SearchPatientsArgs(BaseModel):
     name: Optional[str] = None
-    identifier: Optional[str] = None
+    mrn: Optional[str] = None  # Medical Record Number
+    nationalId: Optional[str] = None  # Saudi National ID
+    iqama: Optional[str] = None  # Iqama number for residents
     birthDate: Optional[str] = None
     gender: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
 
 class GetPatientDetailsArgs(BaseModel):
     patientId: str

@@ -34,10 +34,11 @@ export default function ChatInterface() {
     setIsLoading(true);
 
     try {
-      const response = await sendMessage(content, messages);
+      const updatedMessages = [...messages, userMessage];
+      const response = await sendMessage(content, updatedMessages);
       
       const assistantMessage: Message = {
-        id: messages.length + 2,
+        id: updatedMessages.length + 1,
         role: 'assistant',
         content: response.response,
         timestamp: new Date(),

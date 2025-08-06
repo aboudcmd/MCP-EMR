@@ -2,7 +2,7 @@
 
 echo "📊 Loading sample data into FHIR server..."
 
-FHIR_URL="http://localhost:8081/fhir"
+FHIR_URL="http://10.201.205.101:8007/"
 
 # Helper: given a path like "sample-data/patients/patient-001.json",
 # extract "patient-001" (basename without .json)

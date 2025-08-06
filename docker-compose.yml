@@ -1,50 +1,15 @@
-version: '3.8'
 
 services:
-  # PostgreSQL Database for FHIR
-  fhir-db:
-    image: postgres:14
-    container_name: emr-fhir-db
-    environment:
-      POSTGRES_DB:       hapi
-      POSTGRES_USER:     hapi
-      POSTGRES_PASSWORD: hapi
-    volumes:
-      - fhir-data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    networks:
-      - emr-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hapi"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # HAPI FHIR Server
-  fhir-server:
-    image: hapiproject/hapi:latest
-    container_name: emr-fhir-server
-    environment:
-      # JDBC connection
-      SPRING_DATASOURCE_URL:                 "jdbc:postgresql://fhir-db:5432/hapi"
-      SPRING_DATASOURCE_USERNAME:            "hapi"
-      SPRING_DATASOURCE_PASSWORD:            "hapi"
-      SPRING_DATASOURCE_DRIVER_CLASS_NAME:   "org.postgresql.Driver"
-      # Auto‐schema update & SQL logging
-      SPRING_JPA_HIBERNATE_DDL_AUTO:         "update"
-      SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: "ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgresDialect"
-      SPRING_JPA_SHOW_SQL:                   "true"
-      SPRING_JPA_PROPERTIES_FORMAT_SQL:      "true"
-      HAPI_FHIR_ENABLE_REPOSITORY_VALIDATING_INTERCEPTOR: "false"
-    ports:
-      - "8081:8080"
-    depends_on:
-      fhir-db:
-        condition: service_healthy
-    networks:
-      - emr-network
-    restart: unless-stopped
+  # External FHIR Server (Spark FHIR) - using external server at 10.201.205.101:8007
+  # No local FHIR server or database needed - commenting out for reference
+  #
+  # fhir-db:
+  #   image: postgres:14
+  #   ...
+  #
+  # fhir-server:
+  #   image: hapiproject/hapi:latest
+  #   ...
 
   # Python MCP Server
   mcp-server:
@@ -53,10 +18,8 @@ services:
     env_file:
       - .env
     environment:
-      # point at the in-Docker FHIR server
-      FHIR_SERVER_URL: http://fhir-server:8080/fhir
-    depends_on:
-      - fhir-server
+      # point at the external Spark FHIR server
+      FHIR_SERVER_URL: http://10.201.205.101:8007/
     networks:
       - emr-network
 
@@ -69,13 +32,12 @@ services:
     env_file:
       - .env
     environment:
-      # point at the in-Docker MCP server & FHIR server
+      # point at the in-Docker MCP server & external FHIR server
       MCP_SERVER_PATH: /app/mcp_server/main.py
-      FHIR_SERVER_URL: http://fhir-server:8080/fhir
+      FHIR_SERVER_URL: http://10.201.205.101:8007/
       CORS_ORIGIN:    http://localhost:3000
     depends_on:
       - mcp-server
-      - fhir-server
     volumes:
       - ./mcp-server-python:/app/mcp_server:ro
     networks:
@@ -97,21 +59,21 @@ services:
     networks:
       - emr-network
 
-  # Adminer - Postgres GUI
-  adminer:
-    image: adminer
-    container_name: emr-adminer
-    ports:
-      - "8082:8080"
-    depends_on:
-      - fhir-db
-    environment:
-      ADMINER_DEFAULT_SERVER: fhir-db
-    networks:
-      - emr-network
+  # Adminer - Postgres GUI (disabled since using external FHIR server)
+  # adminer:
+  #   image: adminer
+  #   container_name: emr-adminer
+  #   ports:
+  #     - "8082:8080"
+  #   depends_on:
+  #     - fhir-db
+  #   environment:
+  #     ADMINER_DEFAULT_SERVER: fhir-db
+  #   networks:
+  #     - emr-network
 
-volumes:
-  fhir-data:
+# volumes:
+  # fhir-data: # Not needed since using external FHIR server
 
 networks:
   emr-network:

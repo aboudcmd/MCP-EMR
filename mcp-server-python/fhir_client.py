@@ -20,7 +20,10 @@ class FHIRClient:
     async def _make_request(self, method: str, path: str, params: Optional[Dict] = None):
         """Make HTTP request to FHIR server"""
         async with httpx.AsyncClient() as client:
-            url = f"{self.base_url}{path}"
+            # Ensure path starts with /fhir for Spark FHIR server
+            if not path.startswith('/fhir'):
+                path = f"/fhir{path}"
+            url = f"{self.base_url.rstrip('/')}{path}"
             if params:
                 url = f"{url}?{urlencode(params)}"
             
@@ -29,16 +32,24 @@ class FHIRClient:
             return response.json()
     
     async def search_patients(self, args: SearchPatientsArgs):
-        """Search for patients"""
+        """Search for patients in Spark FHIR server"""
         params = {}
         if args.name:
             params["name"] = args.name
-        if args.identifier:
-            params["identifier"] = args.identifier
+        if args.mrn:
+            params["identifier"] = f"http://nphies.sa/identifier/mrn|{args.mrn}"
+        if args.nationalId:
+            params["identifier"] = f"http://nphies.sa/identifier/nationalid|{args.nationalId}"
+        if args.iqama:
+            params["identifier"] = f"http://nphies.sa/identifier/iqama|{args.iqama}"
         if args.birthDate:
             params["birthdate"] = args.birthDate
         if args.gender:
             params["gender"] = args.gender
+        if args.phone:
+            params["telecom"] = f"phone|{args.phone}"
+        if args.email:
+            params["telecom"] = f"email|{args.email}"
         
         data = await self._make_request("GET", "/Patient", params)
         return self._format_bundle(data)
@@ -122,29 +133,75 @@ class FHIRClient:
         }
     
     def _format_patient(self, patient: Dict) -> Dict:
-        """Format patient resource"""
+        """Format patient resource for Spark FHIR server"""
         name_parts = []
         if patient.get("name") and len(patient["name"]) > 0:
             name = patient["name"][0]
-            if name.get("given"):
-                name_parts.extend(name["given"])
-            if name.get("family"):
-                name_parts.append(name["family"])
+            # Use text field first if available, otherwise construct from given/family
+            if name.get("text"):
+                formatted_name = name["text"]
+            else:
+                if name.get("given"):
+                    name_parts.extend(name["given"])
+                if name.get("family"):
+                    name_parts.append(name["family"])
+                formatted_name = " ".join(name_parts) if name_parts else "Unknown"
+        else:
+            formatted_name = "Unknown"
         
+        # Extract phone and email
         phone = None
+        email = None
         if patient.get("telecom"):
             phone_contact = next((t for t in patient["telecom"] if t.get("system") == "phone"), None)
+            email_contact = next((t for t in patient["telecom"] if t.get("system") == "email"), None)
             if phone_contact:
                 phone = phone_contact.get("value")
+            if email_contact:
+                email = email_contact.get("value")
+        
+        # Extract MRN and National ID
+        mrn = None
+        national_id = None
+        iqama = None
+        if patient.get("identifier"):
+            for identifier in patient["identifier"]:
+                system = identifier.get("system", "")
+                if "mrn" in system:
+                    mrn = identifier.get("value")
+                elif "nationalid" in system:
+                    national_id = identifier.get("value")
+                elif "iqama" in system:
+                    iqama = identifier.get("value")
+        
+        # Extract marital status
+        marital_status = None
+        if patient.get("maritalStatus") and patient["maritalStatus"].get("coding"):
+            marital_status = patient["maritalStatus"]["coding"][0].get("display")
+        
+        # Extract citizenship
+        citizenship = None
+        if patient.get("extension"):
+            citizenship_ext = next((ext for ext in patient["extension"] if "citizenship" in ext.get("url", "")), None)
+            if citizenship_ext and citizenship_ext.get("extension"):
+                code_ext = citizenship_ext["extension"][0]
+                if code_ext.get("valueCodeableConcept") and code_ext["valueCodeableConcept"].get("coding"):
+                    citizenship = code_ext["valueCodeableConcept"]["coding"][0].get("code")
         
         return {
             "id": patient.get("id"),
-            "name": " ".join(name_parts) if name_parts else "Unknown",
+            "name": formatted_name,
             "birthDate": patient.get("birthDate"),
             "gender": patient.get("gender"),
-            "identifier": patient.get("identifier", [{}])[0].get("value") if patient.get("identifier") else None,
+            "mrn": mrn,
+            "nationalId": national_id,
+            "iqama": iqama,
             "phone": phone,
-            "address": patient.get("address", [{}])[0] if patient.get("address") else None,
+            "email": email,
+            "active": patient.get("active"),
+            "maritalStatus": marital_status,
+            "citizenship": citizenship,
+            "country": patient.get("address", [{}])[0].get("country") if patient.get("address") else None,
         }
     
     def _format_conditions(self, bundle: Dict) -> List[Dict]:

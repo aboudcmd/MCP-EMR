@@ -2,7 +2,7 @@
 echo === Loading All Sample Data ===
 echo.
 
-set FHIR_URL=http://localhost:8081/fhir
+set FHIR_URL=http://10.201.205.101:8007/
 cd ..
 
 echo [1/6] Loading Patients...

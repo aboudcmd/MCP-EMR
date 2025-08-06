@@ -20,7 +20,7 @@ load_dotenv()
 
 # Initialize FHIR client
 fhir_client = FHIRClient(
-    base_url=os.getenv("FHIR_SERVER_URL", "http://localhost:8081/fhir")
+    base_url=os.getenv("FHIR_SERVER_URL", "http://10.201.205.101:8007/")
 )
 
 async def execute_tool(tool_name: str, args: dict):
