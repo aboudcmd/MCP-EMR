@@ -1,4 +1,5 @@
 import httpx
+import logging
 from typing import Optional, List, Dict, Any
 from urllib.parse import urlencode
 
@@ -7,6 +8,8 @@ from types_models import (
     GetPatientObservationsArgs,
     GetPatientEncountersArgs
 )
+
+logger = logging.getLogger(__name__)
 
 class FHIRClient:
     def __init__(self, base_url: str, auth_token: Optional[str] = None):
@@ -27,9 +30,21 @@ class FHIRClient:
             if params:
                 url = f"{url}?{urlencode(params)}"
             
+            logger.info(f"Making FHIR request: {method} {url}")
+            
             response = await client.request(method, url, headers=self.headers)
+            logger.info(f"FHIR response status: {response.status_code}")
+            
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            
+            # Log result summary
+            if isinstance(result, dict):
+                total = result.get('total', 'unknown')
+                entry_count = len(result.get('entry', []))
+                logger.info(f"FHIR response: total={total}, entries={entry_count}")
+            
+            return result
     
     async def search_patients(self, args: SearchPatientsArgs):
         """Search for patients in Spark FHIR server"""
@@ -94,8 +109,14 @@ class FHIRClient:
                 date_range.append(f"le{args.dateTo}")
             params["date"] = ",".join(date_range)
         
+        logger.info(f"Querying observations for patient {args.patientId} with params: {params}")
+        
         data = await self._make_request("GET", "/Observation", params)
-        return self._format_observations(data)
+        formatted_result = self._format_observations(data)
+        
+        logger.info(f"Formatted {len(formatted_result.get('observations', []))} observations for patient {args.patientId}")
+        
+        return formatted_result
     
     async def get_patient_encounters(self, args: GetPatientEncountersArgs):
         """Get patient encounters/visits"""

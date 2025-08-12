@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import asyncio
+import logging
 from dotenv import load_dotenv
 
 from fhir_client import FHIRClient
@@ -15,6 +16,13 @@ from types_models import (
     GetPatientAllergiesArgs
 )
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # Load environment variables
 load_dotenv()
 
@@ -22,6 +30,9 @@ load_dotenv()
 fhir_client = FHIRClient(
     base_url=os.getenv("FHIR_SERVER_URL", "http://10.201.205.101:8007/")
 )
+
+# Server state
+initialized = False
 
 async def execute_tool(tool_name: str, args: dict):
     """Execute a tool based on its name and arguments"""
@@ -60,43 +71,127 @@ async def execute_tool(tool_name: str, args: dict):
     else:
         raise ValueError(f"Unknown tool: {tool_name}")
 
-async def main():
-    """Main entry point for the MCP server"""
-    # Read request from stdin
-    request_data = sys.stdin.read()
+async def handle_request(request: dict) -> dict:
+    """Handle a single JSON-RPC request"""
+    global initialized
     
     try:
-        request = json.loads(request_data)
+        method = request.get("method")
+        params = request.get("params", {})
+        request_id = request.get("id")
         
-        # Execute the tool
-        result = await execute_tool(
-            request["params"]["name"],
-            request["params"]["arguments"]
-        )
+        if method == "initialize":
+            # Handle initialization
+            initialized = True
+            return {
+                "jsonrpc": "2.0",
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {
+                            "listChanged": True
+                        }
+                    },
+                    "serverInfo": {
+                        "name": "emr-fhir-server",
+                        "version": "1.0.0"
+                    }
+                },
+                "id": request_id
+            }
         
-        # Send response
-        response = {
-            "jsonrpc": "2.0",
-            "result": result,
-            "id": request["id"]
-        }
+        elif method == "tools/call":
+            # Handle tool calls
+            if not initialized:
+                raise Exception("Server not initialized")
+            
+            tool_name = params.get("name")
+            tool_args = params.get("arguments", {})
+            
+            logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
+            
+            result = await execute_tool(tool_name, tool_args)
+            
+            return {
+                "jsonrpc": "2.0",
+                "result": result,
+                "id": request_id
+            }
         
-        print(json.dumps(response))
-        sys.exit(0)
-        
+        else:
+            raise Exception(f"Unknown method: {method}")
+    
     except Exception as e:
-        # Send error response
-        error_response = {
+        logger.error(f"Error handling request: {e}", exc_info=True)
+        return {
             "jsonrpc": "2.0",
             "error": {
                 "code": -32603,
                 "message": str(e)
             },
-            "id": 1
+            "id": request.get("id")
         }
-        
-        print(json.dumps(error_response), file=sys.stderr)
-        sys.exit(1)
+
+async def main():
+    """Main entry point for the persistent MCP server"""
+    logger.info("Starting MCP server...")
+    
+    try:
+        # Read requests from stdin line by line
+        while True:
+            try:
+                # Read a line from stdin
+                line = sys.stdin.readline()
+                if not line:
+                    break  # EOF
+                
+                line = line.strip()
+                if not line:
+                    continue
+                
+                logger.info(f"Received request: {line[:100]}...")
+                
+                # Parse JSON request
+                request = json.loads(line)
+                
+                # Handle the request
+                response = await handle_request(request)
+                
+                # Send response
+                response_json = json.dumps(response)
+                print(response_json, flush=True)
+                logger.info(f"Sent response: {response_json[:100]}...")
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decode error: {e}")
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32700,
+                        "message": "Parse error"
+                    },
+                    "id": None
+                }
+                print(json.dumps(error_response), flush=True)
+                
+            except Exception as e:
+                logger.error(f"Unexpected error: {e}", exc_info=True)
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32603,
+                        "message": f"Internal error: {str(e)}"
+                    },
+                    "id": None
+                }
+                print(json.dumps(error_response), flush=True)
+    
+    except KeyboardInterrupt:
+        logger.info("Server stopped by user")
+    except Exception as e:
+        logger.error(f"Server error: {e}", exc_info=True)
+    finally:
+        logger.info("MCP server shutting down...")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from groq_client import GroqClient
-from mcp_executor import MCPExecutor
+from mcp_executor import PersistentMCPExecutor
 
 # Load environment variables
 root_dir = Path(__file__).parent.parent
@@ -40,9 +40,12 @@ app.add_middleware(
 
 # Initialize clients
 groq_client = GroqClient(os.getenv("GROQ_API_KEY", ""))
-mcp_executor = MCPExecutor(
+mcp_executor = PersistentMCPExecutor(
     mcp_server_path=os.getenv("MCP_SERVER_PATH", "../mcp-server-python/main.py")
 )
+
+# Global variable to track conversation context length
+max_context_length = 15  # Keep last 15 messages to prevent context exhaustion
 
 # Request/Response models
 class Message(BaseModel):
@@ -216,14 +219,20 @@ async def chat(request: ChatRequest):
     try:
         logger.info(f"Received chat request: {request.message}")
         
+        # Truncate conversation history to prevent context exhaustion
+        conversation_history = request.conversationHistory
+        if len(conversation_history) > max_context_length:
+            conversation_history = conversation_history[-max_context_length:]
+            logger.info(f"Truncated conversation history to last {max_context_length} messages")
+        
         # Build conversation history
         messages = []
         
         # Add system prompt
         messages.append({"role": "system", "content": SYSTEM_PROMPT})
         
-        # Add conversation history
-        for msg in request.conversationHistory:
+        # Add truncated conversation history
+        for msg in conversation_history:
             messages.append({"role": msg.role, "content": msg.content})
         
         # Add current user message
@@ -262,11 +271,13 @@ async def chat(request: ChatRequest):
                 try:
                     logger.info(f"Executing tool: {tool_call.function.name}")
                     
-                    # Execute the tool
+                    # Execute the tool with persistent connection
                     result = await mcp_executor.execute_tool(
                         tool_call.function.name,
                         tool_call.function.arguments
                     )
+                    
+                    logger.info(f"Tool {tool_call.function.name} executed successfully")
                     
                     # Add tool result to messages
                     # Add tool result to messages
@@ -293,26 +304,49 @@ async def chat(request: ChatRequest):
             final_message = final_response.choices[0].message
            
            # Return the response
+            # Update conversation history with truncation
+            updated_history = conversation_history + [
+                Message(role="user", content=request.message),
+                Message(role="assistant", content=final_message.content)
+            ]
+            
             return ChatResponse(
                 response=final_message.content,
-                conversationHistory=request.conversationHistory + [
-                    Message(role="user", content=request.message),
-                    Message(role="assistant", content=final_message.content)
-                ]
+                conversationHistory=updated_history
             )
         else:
             # No tools needed, return direct response
+            updated_history = conversation_history + [
+                Message(role="user", content=request.message),
+                Message(role="assistant", content=response_message.content)
+            ]
+            
             return ChatResponse(
                 response=response_message.content,
-                conversationHistory=request.conversationHistory + [
-                    Message(role="user", content=request.message),
-                    Message(role="assistant", content=response_message.content)
-                ]
+                conversationHistory=updated_history
             )
            
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to process chat request: {str(e)}")
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize MCP executor on startup"""
+    try:
+        await mcp_executor.start()
+        logger.info("MCP executor started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start MCP executor: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up MCP executor on shutdown"""
+    try:
+        await mcp_executor.stop()
+        logger.info("MCP executor stopped successfully")
+    except Exception as e:
+        logger.error(f"Error stopping MCP executor: {e}")
 
 if __name__ == "__main__":
    import uvicorn
