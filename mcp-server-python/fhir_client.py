@@ -61,7 +61,7 @@ class FHIRClient:
     
     async def get_patient_conditions(self, patient_id: str, clinical_status: Optional[str] = None):
         """Get patient conditions/diagnoses"""
-        params = {"patient": patient_id}
+        params = {"patient": patient_id, "_count": "50"}  # Increase count to get actual entries
         if clinical_status:
             params["clinical-status"] = clinical_status
         
@@ -70,7 +70,7 @@ class FHIRClient:
     
     async def get_patient_medications(self, patient_id: str, status: Optional[str] = None):
         """Get patient medications"""
-        params = {"patient": patient_id}
+        params = {"patient": patient_id, "_count": "50"}  # Increase count to get actual entries
         if status:
             params["status"] = status
         
@@ -79,7 +79,7 @@ class FHIRClient:
     
     async def get_patient_observations(self, args: GetPatientObservationsArgs):
         """Get patient observations (vitals, lab results)"""
-        params = {"patient": args.patientId}
+        params = {"patient": args.patientId, "_count": "50"}  # Increase count to get actual entries
         if args.category:
             params["category"] = args.category
         if args.code:
@@ -233,66 +233,228 @@ class FHIRClient:
         
         return conditions
     
-    def _format_medications(self, bundle: Dict) -> List[Dict]:
+    def _format_medications(self, bundle: Dict) -> Dict:
         """Format medications bundle"""
         if not bundle.get("entry"):
-            return []
+            return {"total": 0, "medications": []}
         
         medications = []
         for entry in bundle["entry"]:
             resource = entry["resource"]
-            med_text = None
-            if resource.get("medicationCodeableConcept"):
-                if resource["medicationCodeableConcept"].get("text"):
-                    med_text = resource["medicationCodeableConcept"]["text"]
-                elif resource["medicationCodeableConcept"].get("coding"):
-                    med_text = resource["medicationCodeableConcept"]["coding"][0].get("display")
             
+            # Get medication name from different possible locations
+            med_text = None
+            med_code = None
+            med_system = None
+            
+            # Check contained resources first (common in Saudi FHIR implementation)
+            if resource.get("contained"):
+                for contained in resource["contained"]:
+                    if contained.get("resourceType") == "Medication" and contained.get("code"):
+                        code = contained["code"]
+                        if code.get("text"):
+                            med_text = code["text"]
+                        elif code.get("coding") and len(code["coding"]) > 0:
+                            coding = code["coding"][0]
+                            med_text = coding.get("display")
+                            med_code = coding.get("code")
+                            med_system = coding.get("system")
+                        break
+            
+            # Fallback to medicationCodeableConcept (alternative structure)
+            if not med_text and resource.get("medicationCodeableConcept"):
+                med_concept = resource["medicationCodeableConcept"]
+                if med_concept.get("text"):
+                    med_text = med_concept["text"]
+                elif med_concept.get("coding") and len(med_concept["coding"]) > 0:
+                    coding = med_concept["coding"][0]
+                    med_text = coding.get("display")
+                    med_code = coding.get("code")
+                    med_system = coding.get("system")
+            
+            # Fallback to medicationReference
+            if not med_text and resource.get("medicationReference"):
+                med_text = resource["medicationReference"].get("display", "Referenced Medication")
+            
+            # Get dosage information
             dosage = None
+            dosage_details = []
             if resource.get("dosageInstruction") and len(resource["dosageInstruction"]) > 0:
-                dosage = resource["dosageInstruction"][0].get("text")
+                dosage_inst = resource["dosageInstruction"][0]
+                dosage = dosage_inst.get("text")
+                
+                # Extract additional dosage details
+                if dosage_inst.get("timing"):
+                    timing = dosage_inst["timing"]
+                    if timing.get("repeat"):
+                        repeat = timing["repeat"]
+                        frequency = repeat.get("frequency")
+                        period = repeat.get("period")
+                        period_unit = repeat.get("periodUnit")
+                        if frequency and period:
+                            dosage_details.append(f"Frequency: {frequency} times per {period} {period_unit}")
+                
+                if dosage_inst.get("route") and dosage_inst["route"].get("coding"):
+                    route = dosage_inst["route"]["coding"][0].get("display", "")
+                    if route:
+                        dosage_details.append(f"Route: {route}")
+                
+                if dosage_inst.get("doseAndRate"):
+                    dose_rate = dosage_inst["doseAndRate"][0]
+                    if dose_rate.get("doseQuantity"):
+                        dose_qty = dose_rate["doseQuantity"]
+                        dose_value = dose_qty.get("value")
+                        dose_unit = dose_qty.get("unit")
+                        if dose_value and dose_unit:
+                            dosage_details.append(f"Dose: {dose_value} {dose_unit}")
+            
+            # Get category/classification
+            category = None
+            if resource.get("category") and len(resource["category"]) > 0:
+                if resource["category"][0].get("coding"):
+                    category = resource["category"][0]["coding"][0].get("display")
+            
+            # Get priority
+            priority = None
+            if resource.get("priority"):
+                priority = resource["priority"]
+            
+            # Get reason for medication
+            reason = None
+            if resource.get("reasonCode") and len(resource["reasonCode"]) > 0:
+                if resource["reasonCode"][0].get("coding"):
+                    reason = resource["reasonCode"][0]["coding"][0].get("display")
+                elif resource["reasonCode"][0].get("text"):
+                    reason = resource["reasonCode"][0]["text"]
+            
+            # Get prescriber information
+            requester = None
+            if resource.get("requester"):
+                requester = resource["requester"].get("display")
             
             medications.append({
                 "id": resource.get("id"),
-                "medication": med_text,
+                "medication": med_text or "Unknown Medication",
+                "medicationCode": med_code,
+                "medicationSystem": med_system,
                 "status": resource.get("status"),
+                "intent": resource.get("intent"),
+                "category": category,
+                "priority": priority,
                 "dosage": dosage,
+                "dosageDetails": dosage_details if dosage_details else None,
+                "reason": reason,
+                "requester": requester,
                 "authoredOn": resource.get("authoredOn"),
+                "dispenseRequest": resource.get("dispenseRequest"),
+                "substitution": resource.get("substitution"),
+                "note": resource.get("note")[0].get("text") if resource.get("note") else None
             })
         
-        return medications
+        return {
+            "total": bundle.get("total", len(medications)),
+            "medications": medications
+        }
     
-    def _format_observations(self, bundle: Dict) -> List[Dict]:
+    def _format_observations(self, bundle: Dict) -> Dict:
         """Format observations bundle"""
         if not bundle.get("entry"):
-            return []
+            return {"total": 0, "observations": []}
         
         observations = []
         for entry in bundle["entry"]:
             resource = entry["resource"]
             
-            # Get observation type
+            # Get observation type/code
             obs_type = None
+            obs_code = None
+            obs_system = None
             if resource.get("code"):
                 if resource["code"].get("coding") and len(resource["code"]["coding"]) > 0:
-                    obs_type = resource["code"]["coding"][0].get("display")
+                    coding = resource["code"]["coding"][0]
+                    obs_type = coding.get("display")
+                    obs_code = coding.get("code")
+                    obs_system = coding.get("system")
                 elif resource["code"].get("text"):
                     obs_type = resource["code"]["text"]
             
-            # Get value
+            # Get category
+            category = None
+            if resource.get("category") and len(resource["category"]) > 0:
+                if resource["category"][0].get("coding"):
+                    category = resource["category"][0]["coding"][0].get("display")
+            
+            # Get value - handle both simple valueQuantity and component values
             value = None
+            components = []
+            
             if resource.get("valueQuantity"):
-                value = f"{resource['valueQuantity'].get('value')} {resource['valueQuantity'].get('unit', '')}"
+                # Simple value
+                value_qty = resource["valueQuantity"]
+                value = f"{value_qty.get('value')} {value_qty.get('unit', '')}"
+            elif resource.get("component"):
+                # Component values (e.g., systolic/diastolic blood pressure)
+                for component in resource["component"]:
+                    comp_code = None
+                    comp_value = None
+                    
+                    if component.get("code") and component["code"].get("coding"):
+                        comp_code = component["code"]["coding"][0].get("display")
+                    
+                    if component.get("valueQuantity"):
+                        comp_qty = component["valueQuantity"]
+                        comp_value = f"{comp_qty.get('value')} {comp_qty.get('unit', '')}"
+                    
+                    components.append({
+                        "code": comp_code,
+                        "value": comp_value
+                    })
+                
+                # Create a combined value string for components
+                if components:
+                    comp_values = [f"{c['code']}: {c['value']}" for c in components if c['code'] and c['value']]
+                    value = ", ".join(comp_values) if comp_values else None
+            
+            # Get interpretation
+            interpretation = None
+            if resource.get("interpretation") and len(resource["interpretation"]) > 0:
+                if resource["interpretation"][0].get("coding"):
+                    interpretation = resource["interpretation"][0]["coding"][0].get("display")
+            
+            # Get reference ranges
+            reference_range = None
+            if resource.get("referenceRange") and len(resource["referenceRange"]) > 0:
+                ref_range = resource["referenceRange"][0]
+                low = ref_range.get("low", {}).get("value")
+                high = ref_range.get("high", {}).get("value")
+                unit = ref_range.get("low", {}).get("unit") or ref_range.get("high", {}).get("unit")
+                if low and high:
+                    reference_range = f"{low}-{high} {unit}"
+                elif low:
+                    reference_range = f">{low} {unit}"
+                elif high:
+                    reference_range = f"<{high} {unit}"
             
             observations.append({
                 "id": resource.get("id"),
+                "code": obs_code,
+                "codeSystem": obs_system,
                 "type": obs_type,
+                "category": category,
                 "value": value,
+                "components": components if components else None,
+                "interpretation": interpretation,
+                "referenceRange": reference_range,
                 "effectiveDateTime": resource.get("effectiveDateTime"),
+                "effectiveDate": resource.get("effectiveDate"),
                 "status": resource.get("status"),
+                "note": resource.get("note")[0].get("text") if resource.get("note") else None
             })
         
-        return observations
+        return {
+            "total": bundle.get("total", len(observations)),
+            "observations": observations
+        }
     
     def _format_encounters(self, bundle: Dict) -> List[Dict]:
         """Format encounters bundle"""

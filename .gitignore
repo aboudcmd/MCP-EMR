@@ -33,3 +33,5 @@ logs/
 
 # Docker volumes
 fhir-data/
+
+test_spark_fhir.py
