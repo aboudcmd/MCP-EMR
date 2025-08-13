@@ -1,25 +1,42 @@
 import logging
 from typing import List, Dict, Any
 from groq import Groq
+from semantic_router import SemanticQueryRouter
 
 logger = logging.getLogger(__name__)
 
 class GroqClient:
     def __init__(self, api_key: str):
         self.client = Groq(api_key=api_key)
+        # Initialize semantic router for intelligent query classification
+        try:
+            self.semantic_router = SemanticQueryRouter(similarity_threshold=0.25)
+            logger.info("Semantic query router initialized successfully")
+        except Exception as e:
+            logger.warning(f"Failed to initialize semantic router, falling back to keywords: {e}")
+            self.semantic_router = None
     
     async def chat(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]], system_prompt: str):
         """Send chat request to Groq with tools"""
         try:
-            # Check if the last user message likely needs data
+            # Intelligent query analysis
+            needs_tools = False
             if messages:
-                last_user_msg = messages[-1].get('content', '').lower()
-                data_keywords = ['show', 'get', 'what', 'list', 'find', 'medical', 'vitals', 
-                               'conditions', 'medications', 'allergies', 'summary', 'history',
-                               'all patients', 'patients', 'records']
+                last_user_msg = messages[-1].get('content', '')
                 
-                if any(keyword in last_user_msg for keyword in data_keywords):
-                    logger.info("Query likely needs tool usage")
+                if self.semantic_router:
+                    # Use semantic similarity for tool detection
+                    needs_tools = self.semantic_router.needs_tools(last_user_msg)
+                    if needs_tools:
+                        best_tools = self.semantic_router.get_best_tools(last_user_msg, top_k=3)
+                        tool_names = [tool[0] for tool in best_tools]
+                        logger.info(f"Semantic analysis suggests tools needed: {tool_names}")
+                    else:
+                        logger.info("Semantic analysis: conversational query, no tools needed")
+                else:
+                    # Fallback: assume tools needed for safety if semantic router fails
+                    needs_tools = True
+                    logger.warning("Semantic router unavailable - defaulting to tools enabled")
             
             # Build the request payload
             payload = {
@@ -29,10 +46,15 @@ class GroqClient:
                 "max_tokens": 1024,
             }
             
-            # Only add tools if they're provided
-            if tools:
+            # Only add tools if they're provided and the query needs them
+            if tools and needs_tools:
                 payload["tools"] = tools
                 payload["tool_choice"] = "auto"
+                logger.info("Tools provided to LLM based on query analysis")
+            elif tools and not needs_tools:
+                logger.info("Tools available but withheld - query appears conversational")
+            else:
+                logger.info("No tools available or query doesn't need tools")
             
             response = self.client.chat.completions.create(**payload)
             return response

@@ -1,11 +1,10 @@
 # backend-api-python/main.py
 import os
-import json  # <-- This import was missing!
+import json  
 import logging
-import asyncio
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +12,7 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from groq_client import GroqClient
-from mcp_executor import PersistentMCPExecutor
+from http_mcp_client import HTTPMCPClient
 
 # Load environment variables
 root_dir = Path(__file__).parent.parent
@@ -40,8 +39,8 @@ app.add_middleware(
 
 # Initialize clients
 groq_client = GroqClient(os.getenv("GROQ_API_KEY", ""))
-mcp_executor = PersistentMCPExecutor(
-    mcp_server_path=os.getenv("MCP_SERVER_PATH", "../mcp-server-python/main.py")
+mcp_client = HTTPMCPClient(
+    mcp_server_url=os.getenv("MCP_SERVER_URL", "http://localhost:8001")
 )
 
 # Global variable to track conversation context length
@@ -271,8 +270,8 @@ async def chat(request: ChatRequest):
                 try:
                     logger.info(f"Executing tool: {tool_call.function.name}")
                     
-                    # Execute the tool with persistent connection
-                    result = await mcp_executor.execute_tool(
+                    # Execute the tool via HTTP MCP service
+                    result = await mcp_client.execute_tool(
                         tool_call.function.name,
                         tool_call.function.arguments
                     )
@@ -332,21 +331,24 @@ async def chat(request: ChatRequest):
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize MCP executor on startup"""
+    """Check MCP server health on startup"""
     try:
-        await mcp_executor.start()
-        logger.info("MCP executor started successfully")
+        is_healthy = await mcp_client.health_check()
+        if is_healthy:
+            logger.info("MCP server is healthy and ready")
+        else:
+            logger.warning("MCP server health check failed - service may not be ready")
     except Exception as e:
-        logger.error(f"Failed to start MCP executor: {e}")
+        logger.error(f"Error checking MCP server health: {e}")
 
-@app.on_event("shutdown")
+@app.on_event("shutdown") 
 async def shutdown_event():
-    """Clean up MCP executor on shutdown"""
+    """Clean up HTTP client on shutdown"""
     try:
-        await mcp_executor.stop()
-        logger.info("MCP executor stopped successfully")
+        await mcp_client.close()
+        logger.info("MCP HTTP client closed successfully")
     except Exception as e:
-        logger.error(f"Error stopping MCP executor: {e}")
+        logger.error(f"Error closing MCP client: {e}")
 
 if __name__ == "__main__":
    import uvicorn
