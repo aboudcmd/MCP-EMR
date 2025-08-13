@@ -47,58 +47,127 @@ class FHIRClient:
             return result
     
     async def search_patients(self, args: SearchPatientsArgs):
-        """Search for patients in Spark FHIR server"""
-        params = {}
+        """Search for patients in Spark FHIR server using POST _search endpoint"""
+        form_data = {}
         if args.name:
-            params["name"] = args.name
+            form_data["name"] = args.name
         if args.mrn:
-            params["identifier"] = f"http://nphies.sa/identifier/mrn|{args.mrn}"
+            form_data["identifier"] = f"http://nphies.sa/identifier/mrn|{args.mrn}"
         if args.nationalId:
-            params["identifier"] = f"http://nphies.sa/identifier/nationalid|{args.nationalId}"
+            form_data["identifier"] = f"http://nphies.sa/identifier/nationalid|{args.nationalId}"
         if args.iqama:
-            params["identifier"] = f"http://nphies.sa/identifier/iqama|{args.iqama}"
+            form_data["identifier"] = f"http://nphies.sa/identifier/iqama|{args.iqama}"
         if args.birthDate:
-            params["birthdate"] = args.birthDate
+            form_data["birthdate"] = args.birthDate
         if args.gender:
-            params["gender"] = args.gender
+            form_data["gender"] = args.gender
         if args.phone:
-            params["telecom"] = f"phone|{args.phone}"
+            form_data["telecom"] = f"phone|{args.phone}"
         if args.email:
-            params["telecom"] = f"email|{args.email}"
+            form_data["telecom"] = f"email|{args.email}"
         
-        data = await self._make_request("GET", "/Patient", params)
-        return self._format_bundle(data)
+        # Use POST with form data as per Spark FHIR Postman collection
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url.rstrip('/')}/fhir/Patient/_search"
+            logger.info(f"Making FHIR patient search: POST {url} with data: {form_data}")
+            
+            response = await client.post(url, data=form_data, headers={"Content-Type": "application/x-www-form-urlencoded"})
+            response.raise_for_status()
+            data = response.json()
+            
+            logger.info(f"FHIR patient search response: status={response.status_code}")
+            if isinstance(data, dict):
+                total = data.get('total', 'unknown')
+                entry_count = len(data.get('entry', []))
+                logger.info(f"Patient search response: total={total}, entries={entry_count}")
+            
+            return self._format_bundle(data)
     
     async def get_patient_details(self, patient_id: str):
         """Get detailed patient information"""
         data = await self._make_request("GET", f"/Patient/{patient_id}")
         return self._format_patient(data)
     
-    async def get_patient_conditions(self, patient_id: str, clinical_status: Optional[str] = None):
-        """Get patient conditions/diagnoses"""
-        params = {"patient": patient_id, "_count": "50"}  # Increase count to get actual entries
-        if clinical_status:
-            params["clinical-status"] = clinical_status
+    async def get_patient_everything(self, patient_id: str, resource_types: Optional[List[str]] = None):
+        """Get all patient data using $everything endpoint"""
+        # Build URL with multiple _type parameters as per Postman collection
+        url = f"{self.base_url.rstrip('/')}/fhir/Patient/{patient_id}/$everything"
         
-        data = await self._make_request("GET", "/Condition", params)
-        return self._format_conditions(data)
+        if resource_types:
+            # Add multiple _type query parameters
+            type_params = "&".join([f"_type={rt}" for rt in resource_types])
+            url = f"{url}?{type_params}"
+        
+        logger.info(f"Making FHIR $everything request: GET {url}")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=self.headers)
+            response.raise_for_status()
+            data = response.json()
+            
+            logger.info(f"FHIR $everything response: status={response.status_code}")
+            if isinstance(data, dict):
+                total = data.get('total', 'unknown')
+                entry_count = len(data.get('entry', []))
+                logger.info(f"$everything response: total={total}, entries={entry_count}")
+            
+            # Parse and format the comprehensive response
+            return self._format_everything_response(data)
+    
+    async def get_patient_conditions(self, patient_id: str, clinical_status: Optional[str] = None):
+        """Get patient conditions using Spark FHIR _search endpoint"""
+        # Use POST with form data as per Spark FHIR Postman collection
+        form_data = {"subject": patient_id}
+        if clinical_status:
+            form_data["clinical-status"] = clinical_status
+        
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url.rstrip('/')}/fhir/Condition/_search"
+            logger.info(f"Making FHIR condition request: POST {url} with data: {form_data}")
+            
+            response = await client.post(url, data=form_data, headers={"Content-Type": "application/x-www-form-urlencoded"})
+            response.raise_for_status()
+            data = response.json()
+            
+            logger.info(f"FHIR condition response: status={response.status_code}")
+            if isinstance(data, dict):
+                total = data.get('total', 'unknown')
+                entry_count = len(data.get('entry', []))
+                logger.info(f"Conditions response: total={total}, entries={entry_count}")
+            
+            return self._format_conditions(data)
     
     async def get_patient_medications(self, patient_id: str, status: Optional[str] = None):
-        """Get patient medications"""
-        params = {"patient": patient_id, "_count": "50"}  # Increase count to get actual entries
+        """Get patient medications using Spark FHIR _search endpoint"""
+        # Use POST with form data as per Spark FHIR Postman collection
+        form_data = {"subject": patient_id}
         if status:
-            params["status"] = status
+            form_data["status"] = status
         
-        data = await self._make_request("GET", "/MedicationRequest", params)
-        return self._format_medications(data)
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url.rstrip('/')}/fhir/MedicationRequest/_search"
+            logger.info(f"Making FHIR medication request: POST {url} with data: {form_data}")
+            
+            response = await client.post(url, data=form_data, headers={"Content-Type": "application/x-www-form-urlencoded"})
+            response.raise_for_status()
+            data = response.json()
+            
+            logger.info(f"FHIR medication response: status={response.status_code}")
+            if isinstance(data, dict):
+                total = data.get('total', 'unknown')
+                entry_count = len(data.get('entry', []))
+                logger.info(f"Medications response: total={total}, entries={entry_count}")
+            
+            return self._format_medications(data)
     
     async def get_patient_observations(self, args: GetPatientObservationsArgs):
-        """Get patient observations (vitals, lab results)"""
-        params = {"patient": args.patientId, "_count": "50"}  # Increase count to get actual entries
+        """Get patient observations using Spark FHIR _search endpoint"""
+        # Use POST with form data and Patient/ prefix as per Spark FHIR Postman collection
+        form_data = {"subject": f"Patient/{args.patientId}"}
         if args.category:
-            params["category"] = args.category
+            form_data["category"] = args.category
         if args.code:
-            params["code"] = args.code
+            form_data["code"] = args.code
         
         # Handle date range
         if args.dateFrom or args.dateTo:
@@ -107,16 +176,26 @@ class FHIRClient:
                 date_range.append(f"ge{args.dateFrom}")
             if args.dateTo:
                 date_range.append(f"le{args.dateTo}")
-            params["date"] = ",".join(date_range)
+            form_data["date"] = ",".join(date_range)
         
-        logger.info(f"Querying observations for patient {args.patientId} with params: {params}")
-        
-        data = await self._make_request("GET", "/Observation", params)
-        formatted_result = self._format_observations(data)
-        
-        logger.info(f"Formatted {len(formatted_result.get('observations', []))} observations for patient {args.patientId}")
-        
-        return formatted_result
+        async with httpx.AsyncClient() as client:
+            url = f"{self.base_url.rstrip('/')}/fhir/Observation/_search"
+            logger.info(f"Making FHIR observation request: POST {url} with data: {form_data}")
+            
+            response = await client.post(url, data=form_data, headers={"Content-Type": "application/x-www-form-urlencoded"})
+            response.raise_for_status()
+            data = response.json()
+            
+            logger.info(f"FHIR observation response: status={response.status_code}")
+            if isinstance(data, dict):
+                total = data.get('total', 'unknown')
+                entry_count = len(data.get('entry', []))
+                logger.info(f"Observations response: total={total}, entries={entry_count}")
+            
+            formatted_result = self._format_observations(data)
+            logger.info(f"Formatted {len(formatted_result.get('observations', []))} observations for patient {args.patientId}")
+            
+            return formatted_result
     
     async def get_patient_encounters(self, args: GetPatientEncountersArgs):
         """Get patient encounters/visits"""
@@ -527,3 +606,51 @@ class FHIRClient:
             })
         
         return allergies
+    
+    def _format_everything_response(self, bundle: Dict) -> Dict:
+        """Format $everything endpoint response with all patient data"""
+        if not bundle.get("entry"):
+            return {
+                "patient": None,
+                "observations": [],
+                "conditions": [],
+                "medications": [],
+                "allergies": [],
+                "encounters": []
+            }
+        
+        # Separate resources by type
+        patient_data = None
+        observations = []
+        conditions = []
+        medications = []
+        allergies = []
+        encounters = []
+        
+        for entry in bundle["entry"]:
+            resource = entry.get("resource", {})
+            resource_type = resource.get("resourceType")
+            
+            if resource_type == "Patient":
+                patient_data = self._format_patient(resource)
+            elif resource_type == "Observation":
+                observations.append(resource)
+            elif resource_type == "Condition":
+                conditions.append({"resource": resource})
+            elif resource_type == "MedicationRequest":
+                medications.append({"resource": resource})
+            elif resource_type == "AllergyIntolerance":
+                allergies.append({"resource": resource})
+            elif resource_type == "Encounter":
+                encounters.append({"resource": resource})
+        
+        # Format each resource type using existing formatters
+        return {
+            "patient": patient_data,
+            "observations": self._format_observations({"entry": [{"resource": obs} for obs in observations]})["observations"],
+            "conditions": self._format_conditions({"entry": conditions}),
+            "medications": self._format_medications({"entry": medications})["medications"],
+            "allergies": self._format_allergies({"entry": allergies}),
+            "encounters": self._format_encounters({"entry": encounters}),
+            "total_resources": len(bundle["entry"])
+        }

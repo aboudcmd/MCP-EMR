@@ -180,6 +180,26 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_patient_everything",
+            "description": "Get comprehensive patient data including conditions, medications, observations, allergies, and encounters using the $everything endpoint",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patientId": {"type": "string", "description": "FHIR Patient resource ID"},
+                    "resourceTypes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Specific resource types to include (default: Observation, Condition, MedicationRequest)",
+                        "default": ["Observation", "Condition", "MedicationRequest"]
+                    }
+                },
+                "required": ["patientId"],
+            },
+        },
+    },
 ]
 
 SYSTEM_PROMPT = """You are an EMR (Electronic Medical Records) assistant with access to a FHIR server through tools.

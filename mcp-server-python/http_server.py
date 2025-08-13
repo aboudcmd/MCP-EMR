@@ -97,6 +97,10 @@ async def execute_tool(tool_name: str, args: dict):
         elif tool_name == "get_patient_allergies":
             result = await fhir_client.get_patient_allergies(args["patientId"])
         
+        elif tool_name == "get_patient_everything":
+            resource_types = args.get("resourceTypes", ["Observation", "Condition", "MedicationRequest"])
+            result = await fhir_client.get_patient_everything(args["patientId"], resource_types)
+        
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
         
