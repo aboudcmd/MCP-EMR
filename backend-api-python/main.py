@@ -413,10 +413,10 @@ async def chat(request: ChatRequest):
             # Store a summary of tool results in context instead of raw data
             tool_summary = _create_tool_summary(response_message.tool_calls, messages)
             
-            # Update conversation history with truncation and tool summary
+            # Update conversation history without the context marker
             updated_history = conversation_history + [
                 Message(role="user", content=request.message),
-                Message(role="assistant", content=f"{response_content}\n[Context: {tool_summary}]")
+                Message(role="assistant", content=response_content)
             ]
             
             return ChatResponse(
@@ -515,7 +515,7 @@ async def chat(request: ChatRequest):
                     
                     updated_history = conversation_history + [
                         Message(role="user", content=request.message),
-                        Message(role="assistant", content=f"{response_content}\n[Context: {tool_summary}]")
+                        Message(role="assistant", content=response_content)
                     ]
                     
                     return ChatResponse(
