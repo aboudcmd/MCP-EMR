@@ -310,11 +310,15 @@ class FHIRClient:
             if resource.get("clinicalStatus") and resource["clinicalStatus"].get("coding"):
                 clinical_status = resource["clinicalStatus"]["coding"][0].get("code")
             
+            # Handle onset - can be onsetDateTime or onsetString
+            onset = resource.get("onsetDateTime") or resource.get("onsetString")
+            
             conditions.append({
                 "id": resource.get("id"),
                 "code": code_display,
                 "clinicalStatus": clinical_status,
-                "onsetDateTime": resource.get("onsetDateTime"),
+                "onset": onset,
+                "onsetDateTime": resource.get("onsetDateTime"),  # Keep for backward compatibility
                 "recordedDate": resource.get("recordedDate"),
             })
         

@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,8 +54,9 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    patientId: str = Field(
-        description="The patient ID/MRN to query. All queries will be for this specific patient."
+    patientId: Optional[str] = Field(
+        default=None,
+        description="The patient ID/MRN to query. If provided, all queries will be for this specific patient."
     )
     conversationHistory: List[Message] = Field(
         default=[],
@@ -129,7 +130,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "patientId": {"type": "string", "description": "FHIR Patient resource ID"},
-                    "status": {"type": "string", "enum": ["active", "completed", "stopped"]},
+                    "status": {"type": "string", "enum": ["active", "completed", "stopped", "on-hold", "cancelled", "entered-in-error", "draft", "unknown"], "description": "Status of the medication order"},
                 },
                 "required": ["patientId"],
             },
@@ -144,7 +145,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "patientId": {"type": "string", "description": "FHIR Patient resource ID"},
-                    "category": {"type": "string", "description": "Category of observation"},
+                    "category": {"type": "string", "description": "Category of observation (e.g., vital-signs, laboratory, imaging, procedure, survey, exam, therapy, activity)"},
                     "code": {"type": "string", "description": "LOINC code for specific observation"},
                     "dateFrom": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
                     "dateTo": {"type": "string", "description": "End date (YYYY-MM-DD)"},
@@ -260,16 +261,23 @@ async def chat(request: ChatRequest):
     try:
         logger.info(f"Received chat request: {request.message}")
         
-        # Use the patient ID provided by the frontend
+        # Use the patient ID if provided by the frontend, or extract from message
         patient_id = request.patientId
-        if not patient_id:
-            raise HTTPException(status_code=400, detail="Patient ID is required")
         
-        # Validate patient ID format
-        if not _validate_patient_id(patient_id):
+        # If no patient ID provided, try to extract from the message
+        if not patient_id:
+            patient_id = _extract_patient_id_from_message(request.message)
+            if patient_id:
+                logger.info(f"Extracted patient ID from message: {patient_id}")
+        
+        # Validate patient ID format if provided
+        if patient_id and not _validate_patient_id(patient_id):
             raise HTTPException(status_code=400, detail="Invalid patient ID format. Must be 4-7 digits.")
         
-        logger.info(f"Processing request for patient: {patient_id}")
+        if patient_id:
+            logger.info(f"Processing request for patient: {patient_id}")
+        else:
+            logger.info("Processing general query without specific patient context")
         
         # Truncate conversation history to prevent context exhaustion
         conversation_history = request.conversationHistory
@@ -280,8 +288,11 @@ async def chat(request: ChatRequest):
         # Build conversation history
         messages = []
         
-        # Add system prompt with the specific patient context
-        system_content = SYSTEM_PROMPT + f"\n\nIMPORTANT: You are ONLY allowed to query data for Patient ID {patient_id}. All tool calls MUST use patientId: '{patient_id}'. Do not accept or process queries about other patients."
+        # Add system prompt with patient context if available
+        if patient_id:
+            system_content = SYSTEM_PROMPT + f"\n\nIMPORTANT: You are ONLY allowed to query data for Patient ID {patient_id}. All tool calls MUST use patientId: '{patient_id}'. Do not accept or process queries about other patients."
+        else:
+            system_content = SYSTEM_PROMPT + "\n\nNote: No specific patient context provided. Ask for patient ID when needed for medical queries."
         messages.append({"role": "system", "content": system_content})
         
         # Add truncated conversation history
@@ -291,8 +302,8 @@ async def chat(request: ChatRequest):
         # Add current user message with context injection for follow-ups
         user_message = request.message
         
-        # Always inject the patient ID into queries about medical data
-        if _needs_patient_context(user_message):
+        # Inject patient ID into queries about medical data if we have one
+        if patient_id and _needs_patient_context(user_message):
             # Make the query explicit with the patient ID
             if 'condition' in user_message.lower():
                 user_message = f"Get conditions for patient {patient_id}"
@@ -545,8 +556,17 @@ def _format_tool_result(result: Any, tool_name: str) -> str:
                 for item in result[:5]:
                     if isinstance(item, dict):
                         code = item.get('code', 'Unknown condition')
+                        onset = item.get('onset') or item.get('onsetDateTime') or item.get('onsetString')
+                        status = item.get('clinicalStatus')
+                        
+                        cond_info = code
+                        if onset:
+                            cond_info += f" (Onset: {onset})"
+                        if status:
+                            cond_info += f" - Status: {status}"
+                        
                         if code and code != 'Unknown condition':
-                            conditions.append(code)
+                            conditions.append(cond_info)
                 
                 if conditions:
                     summary = f"TOOL RESULT: Found {count} conditions for this patient:\n"
@@ -566,12 +586,22 @@ def _format_tool_result(result: Any, tool_name: str) -> str:
                         # Try different fields where medication name might be
                         med_name = (
                             item.get('medicationText') or 
-                            item.get('medication', {}).get('text') or
+                            item.get('medication') or
                             item.get('medicationCodeableConcept', {}).get('text') or
                             'Unknown medication'
                         )
+                        status = item.get('status', '')
+                        intent = item.get('intent', '')
+                        authored = item.get('authoredOn', '')
+                        
+                        med_info = med_name
+                        if status:
+                            med_info += f" (Status: {status})"
+                        if authored:
+                            med_info += f" - Prescribed: {authored}"
+                        
                         if med_name != 'Unknown medication':
-                            medications.append(med_name)
+                            medications.append(med_info)
                 
                 if medications:
                     summary = f"TOOL RESULT: Found {count} medications for this patient:\n"
@@ -605,11 +635,40 @@ def _format_tool_result(result: Any, tool_name: str) -> str:
                 name = result.get('name', 'Unknown')
                 birth = result.get('birthDate', 'Unknown')
                 gender = result.get('gender', 'Unknown')
-                mrn = result.get('mrn', '')
+                mrn = result.get('mrn')
+                national_id = result.get('nationalId')
+                iqama = result.get('iqama')
+                phone = result.get('phone')
+                email = result.get('email')
+                active = result.get('active')
+                marital_status = result.get('maritalStatus')
+                citizenship = result.get('citizenship')
+                country = result.get('country')
+                
+                details = f"TOOL RESULT: Patient Details:\n"
+                details += f"Name: {name}\n"
                 if mrn:
-                    return f"TOOL RESULT: Patient Details:\nName: {name}\nMRN: {mrn}\nBirth Date: {birth}\nGender: {gender}"
-                else:
-                    return f"TOOL RESULT: Patient Details:\nName: {name}\nBirth Date: {birth}\nGender: {gender}"
+                    details += f"MRN: {mrn}\n"
+                if national_id:
+                    details += f"National ID: {national_id}\n"
+                if iqama:
+                    details += f"Iqama: {iqama}\n"
+                details += f"Birth Date: {birth}\n"
+                details += f"Gender: {gender}\n"
+                if phone:
+                    details += f"Phone: {phone}\n"
+                if email:
+                    details += f"Email: {email}\n"
+                if active is not None:
+                    details += f"Active: {'Yes' if active else 'No'}\n"
+                if marital_status:
+                    details += f"Marital Status: {marital_status}\n"
+                if citizenship:
+                    details += f"Citizenship: {citizenship}\n"
+                if country:
+                    details += f"Country: {country}\n"
+                
+                return details.rstrip()  # Remove trailing newline
             
             # For paginated results with 'total' field
             if 'total' in result:
@@ -632,7 +691,24 @@ def _format_tool_result(result: Any, tool_name: str) -> str:
                 elif 'observations' in result:
                     return _format_observations_detailed(result)
                 elif 'results' in result:
-                    return f"TOOL RESULT: Found {total} results"
+                    # Handle patient search results
+                    results = result.get('results', [])
+                    if results and isinstance(results[0], dict) and 'name' in results[0]:
+                        # These are patient search results
+                        summary = f"TOOL RESULT: Found {total} patients:\n"
+                        for i, patient in enumerate(results[:5], 1):
+                            name = patient.get('name', 'Unknown')
+                            mrn = patient.get('mrn', '')
+                            birth = patient.get('birthDate', '')
+                            if mrn:
+                                summary += f"{i}. {name} (MRN: {mrn}, DOB: {birth})\n"
+                            else:
+                                summary += f"{i}. {name} (DOB: {birth})\n"
+                        if len(results) > 5:
+                            summary += f"... and {len(results) - 5} more patients"
+                        return summary
+                    else:
+                        return f"TOOL RESULT: Found {total} results"
             
             # Default: return a brief summary
             return "TOOL RESULT: Data retrieved successfully. Use this information in your response."
@@ -797,6 +873,26 @@ def _make_query_explicit(message: str, patient_id: str = None) -> str:
         return f"CALL get_patient_details tool for patient {patient_id} NOW"
     else:
         return f"{message} for patient {patient_id} (USE THE APPROPRIATE TOOL)"
+
+def _extract_patient_id_from_message(message: str) -> Optional[str]:
+    """Extract patient ID from the message text"""
+    import re
+    
+    # Look for patterns like "patient 160278" or "patient ID 160278"
+    patterns = [
+        r'patient\s+(\d{4,7})\b',
+        r'patient\s+id[:\s]+(\d{4,7})\b',
+        r'mrn[:\s]+(\d{4,7})\b',
+        r'patient\s+#?(\d{4,7})\b'
+    ]
+    
+    message_lower = message.lower()
+    for pattern in patterns:
+        match = re.search(pattern, message_lower)
+        if match:
+            return match.group(1)
+    
+    return None
 
 def _validate_patient_id(patient_id: str) -> bool:
     """Validate that the patient ID is in the correct format"""

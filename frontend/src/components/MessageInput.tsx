@@ -4,9 +4,10 @@ import { Send } from 'lucide-react';
 interface MessageInputProps {
   onSendMessage: (message: string) => void;
   disabled: boolean;
+  placeholder?: string;
 }
 
-export default function MessageInput({ onSendMessage, disabled }: MessageInputProps) {
+export default function MessageInput({ onSendMessage, disabled, placeholder }: MessageInputProps) {
   const [input, setInput] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -25,7 +26,7 @@ export default function MessageInput({ onSendMessage, disabled }: MessageInputPr
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about patients, conditions, medications, lab results..."
+            placeholder={placeholder || "Ask about patients, conditions, medications, lab results..."}
             className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             disabled={disabled}
           />

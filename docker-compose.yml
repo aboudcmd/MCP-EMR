@@ -1,4 +1,6 @@
 
+name: mcp-emr
+
 services:
   # Python MCP Server (HTTP Service)
   mcp-server:
