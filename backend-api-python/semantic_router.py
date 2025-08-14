@@ -63,9 +63,15 @@ class SemanticQueryRouter:
                     "patient weight and height measurements",
                     "vitals and clinical observations",
                     "lab test results and values",
-                    "body measurements and vital signs"
+                    "body measurements and vital signs",
+                    "الضغط للمريض",
+                    "العلامات الحيوية",
+                    "قياس الضغط",
+                    "نتائج المختبر",
+                    "الوزن والطول",
+                    "الفحوصات الطبية"
                 ],
-                "keywords": ["vitals", "observations", "measurements", "labs", "results", "blood pressure", "weight", "height", "readings"]
+                "keywords": ["vitals", "observations", "measurements", "labs", "results", "blood pressure", "weight", "height", "readings", "ضغط", "علامات", "قياس", "فحوصات", "وزن", "طول"]
             },
             "get_patient_conditions": {
                 "description": "Get patient medical conditions, diagnoses, and health problems",
@@ -75,9 +81,15 @@ class SemanticQueryRouter:
                     "health problems and conditions",
                     "what diseases is patient diagnosed with",
                     "medical conditions and illnesses",
-                    "patient diagnosis history"
+                    "patient diagnosis history",
+                    "والحالات؟",
+                    "ما هي الحالات الطبية",
+                    "التشخيص الطبي للمريض",
+                    "الأمراض المشخصة",
+                    "الحالة الصحية",
+                    "تاريخ المرض"
                 ],
-                "keywords": ["conditions", "diagnoses", "diseases", "problems", "illness", "medical", "health"]
+                "keywords": ["conditions", "diagnoses", "diseases", "problems", "illness", "medical", "health", "حالات", "تشخيص", "أمراض", "صحية", "مرض"]
             },
             "get_patient_medications": {
                 "description": "Get patient current medications, prescriptions, and drug therapy",
@@ -87,9 +99,15 @@ class SemanticQueryRouter:
                     "patient medication list",
                     "prescribed medicines and pills",
                     "drug therapy and medications",
-                    "pharmaceutical treatments"
+                    "pharmaceutical treatments",
+                    "الأدوية الحالية",
+                    "ما هي الأدوية",
+                    "الوصفات الطبية",
+                    "العلاج الدوائي",
+                    "قائمة الأدوية",
+                    "الأدوية المطلوبة"
                 ],
-                "keywords": ["medications", "prescriptions", "drugs", "medicines", "pills", "therapy", "treatment"]
+                "keywords": ["medications", "prescriptions", "drugs", "medicines", "pills", "therapy", "treatment", "أدوية", "وصفات", "علاج", "دواء"]
             },
             "get_patient_allergies": {
                 "description": "Get patient allergies, intolerances, and adverse reactions",

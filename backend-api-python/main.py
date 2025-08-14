@@ -273,6 +273,9 @@ async def chat(request: ChatRequest):
         # Check if Groq wants to use tools
         if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
             logger.info(f"Executing {len(response_message.tool_calls)} tool calls")
+            # Log which tools the LLM decided to call
+            tool_names = [tc.function.name for tc in response_message.tool_calls]
+            logger.info(f"LLM decided to call tools: {tool_names}")
             
             # Add the assistant's message with tool calls to the conversation
             assistant_msg = {
@@ -332,18 +335,22 @@ async def chat(request: ChatRequest):
             final_message = final_response.choices[0].message
            
            # Return the response
+            # Handle None content from LLM response
+            response_content = final_message.content or "I successfully retrieved the requested information."
+            
             # Update conversation history with truncation
             updated_history = conversation_history + [
                 Message(role="user", content=request.message),
-                Message(role="assistant", content=final_message.content)
+                Message(role="assistant", content=response_content)
             ]
             
             return ChatResponse(
-                response=final_message.content,
+                response=response_content,
                 conversationHistory=updated_history
             )
         else:
             # No tools needed, return direct response
+            logger.warning("LLM did not call any tools despite having access to them")
             updated_history = conversation_history + [
                 Message(role="user", content=request.message),
                 Message(role="assistant", content=response_message.content)
