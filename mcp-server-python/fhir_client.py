@@ -66,7 +66,9 @@ class FHIRClient:
     
     async def search_patients(self, args: SearchPatientsArgs):
         """Search for patients in Spark FHIR server using POST _search endpoint"""
-        form_data = {}
+        form_data = {
+            "_count": "50"  # Limit patient search results
+        }
         if args.name:
             form_data["name"] = args.name
         if args.mrn:
@@ -120,7 +122,10 @@ class FHIRClient:
     
     async def get_patient_conditions(self, patient_id: str, clinical_status: Optional[str] = None):
         """Get patient conditions using Spark FHIR _search endpoint"""
-        form_data = {"subject": patient_id}
+        form_data = {
+            "subject": patient_id,
+            "_count": "100"  # Request up to 100 conditions
+        }
         if clinical_status:
             form_data["clinical-status"] = clinical_status
         
@@ -129,7 +134,10 @@ class FHIRClient:
     
     async def get_patient_medications(self, patient_id: str, status: Optional[str] = None):
         """Get patient medications using Spark FHIR _search endpoint"""
-        form_data = {"subject": patient_id}
+        form_data = {
+            "subject": patient_id,
+            "_count": "100"  # Request up to 100 medications
+        }
         if status:
             form_data["status"] = status
         
@@ -138,7 +146,11 @@ class FHIRClient:
     
     async def get_patient_observations(self, args: GetPatientObservationsArgs):
         """Get patient observations using Spark FHIR _search endpoint"""
-        form_data = {"subject": f"Patient/{args.patientId}"}
+        form_data = {
+            "subject": f"Patient/{args.patientId}",
+            "_count": "100",  # Request up to 100 observations to avoid pagination issues
+            "_sort": "-date"  # Sort by date descending (most recent first)
+        }
         if args.category:
             form_data["category"] = args.category
         if args.code:
@@ -161,7 +173,10 @@ class FHIRClient:
     
     async def get_patient_encounters(self, args: GetPatientEncountersArgs):
         """Get patient encounters/visits"""
-        params = {"patient": args.patientId}
+        params = {
+            "patient": args.patientId,
+            "_count": "100"  # Request up to 100 encounters
+        }
         if args.type:
             params["type"] = args.type
         
@@ -179,7 +194,10 @@ class FHIRClient:
     
     async def get_patient_allergies(self, patient_id: str):
         """Get patient allergies"""
-        params = {"patient": patient_id}
+        params = {
+            "patient": patient_id,
+            "_count": "100"  # Request up to 100 allergies
+        }
         data = await self._make_request("GET", "/AllergyIntolerance", params)
         return self._format_allergies(data)
     
@@ -268,7 +286,14 @@ class FHIRClient:
     
     def _format_conditions(self, bundle: Dict) -> List[Dict]:
         """Format conditions bundle"""
-        if not bundle.get("entry"):
+        total = bundle.get("total", 0)
+        entries = bundle.get("entry", [])
+        
+        logger.info(f"Conditions bundle: total={total}, has_entry={bool(entries)}, entry_count={len(entries)}")
+        
+        if not entries:
+            if total > 0:
+                logger.warning(f"FHIR returned {total} conditions but no entries - likely pagination issue")
             return []
         
         conditions = []
@@ -297,8 +322,15 @@ class FHIRClient:
     
     def _format_medications(self, bundle: Dict) -> Dict:
         """Format medications bundle"""
-        if not bundle.get("entry"):
-            return {"total": 0, "medications": []}
+        total = bundle.get("total", 0)
+        entries = bundle.get("entry", [])
+        
+        logger.info(f"Medications bundle: total={total}, has_entry={bool(entries)}, entry_count={len(entries)}")
+        
+        if not entries:
+            if total > 0:
+                logger.warning(f"FHIR returned {total} medications but no entries - likely pagination issue")
+            return {"total": total, "medications": []}
         
         medications = []
         for entry in bundle["entry"]:
@@ -420,8 +452,17 @@ class FHIRClient:
     
     def _format_observations(self, bundle: Dict) -> Dict:
         """Format observations bundle"""
-        if not bundle.get("entry"):
-            return {"total": 0, "observations": []}
+        # Log the bundle structure for debugging
+        total = bundle.get("total", 0)
+        entries = bundle.get("entry", [])
+        
+        logger.info(f"Observations bundle: total={total}, has_entry={bool(entries)}, entry_count={len(entries)}")
+        
+        if not entries:
+            # If no entries but total > 0, might be a pagination issue
+            if total > 0:
+                logger.warning(f"FHIR returned {total} observations but no entries - pagination issue?")
+            return {"total": total, "observations": []}
         
         observations = []
         for entry in bundle["entry"]:
@@ -513,6 +554,16 @@ class FHIRClient:
                 "note": resource.get("note")[0].get("text") if resource.get("note") else None
             })
         
+        # Sort observations by date (most recent first)
+        try:
+            observations.sort(
+                key=lambda x: x.get('effectiveDateTime') or x.get('effectiveDate') or '1900-01-01',
+                reverse=True
+            )
+            logger.info(f"Sorted {len(observations)} observations by date (most recent first)")
+        except Exception as e:
+            logger.warning(f"Could not sort observations by date: {e}")
+        
         return {
             "total": bundle.get("total", len(observations)),
             "observations": observations
@@ -520,7 +571,14 @@ class FHIRClient:
     
     def _format_encounters(self, bundle: Dict) -> List[Dict]:
         """Format encounters bundle"""
-        if not bundle.get("entry"):
+        total = bundle.get("total", 0)
+        entries = bundle.get("entry", [])
+        
+        logger.info(f"Encounters bundle: total={total}, has_entry={bool(entries)}, entry_count={len(entries)}")
+        
+        if not entries:
+            if total > 0:
+                logger.warning(f"FHIR returned {total} encounters but no entries - likely pagination issue")
             return []
         
         encounters = []
@@ -544,7 +602,14 @@ class FHIRClient:
     
     def _format_allergies(self, bundle: Dict) -> List[Dict]:
         """Format allergies bundle"""
-        if not bundle.get("entry"):
+        total = bundle.get("total", 0)
+        entries = bundle.get("entry", [])
+        
+        logger.info(f"Allergies bundle: total={total}, has_entry={bool(entries)}, entry_count={len(entries)}")
+        
+        if not entries:
+            if total > 0:
+                logger.warning(f"FHIR returned {total} allergies but no entries - likely pagination issue")
             return []
         
         allergies = []

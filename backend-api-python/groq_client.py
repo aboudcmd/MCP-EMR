@@ -13,42 +13,38 @@ class GroqClient:
     async def chat(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]], system_prompt: str):
         """Send chat request to Groq with tools"""
         try:
-            # Simple pattern-based tool selection
-            needs_tools = False
+            # Check if this is a tool result response (no tools needed)
+            has_tool_results = any(msg.get('role') == 'tool' for msg in messages[-3:])
             
-            if messages and tools:  # Only analyze if tools are provided
-                last_user_msg = messages[-1].get('content', '')
-                last_user_role = messages[-1].get('role', '')
-                
-                # Skip tool analysis for tool results or JSON data
-                if last_user_role == 'user' and not self._looks_like_json_data(last_user_msg):
-                    needs_tools = self._should_use_tools(last_user_msg)
-                    if needs_tools:
-                        logger.info("Query requires medical data - providing tools to LLM")
-                    else:
-                        logger.info("Conversational query detected - no tools needed")
-                else:
-                    # For final response generation with tool results, don't use tools
-                    needs_tools = False
-                    logger.info("Generating final response with tool results - no additional tools needed")
+            # Analyze if the query needs tools
+            last_user_msg = ""
+            for msg in reversed(messages):
+                if msg.get('role') == 'user':
+                    last_user_msg = msg.get('content', '').lower()
+                    break
+            
+            # Check if this is a follow-up query that needs tools
+            needs_forced_tools = self._is_medical_follow_up(last_user_msg, messages)
             
             # Build the request payload
             payload = {
-                "model": "moonshotai/kimi-k2-instruct",  # Changed to more reliable model
+                "model": "moonshotai/kimi-k2-instruct",
                 "messages": messages,
                 "temperature": 0,
                 "max_tokens": 1024,
             }
             
-            # Only add tools if they're provided and the query needs them
-            if tools and needs_tools:
+            # If tools are provided and this isn't a response with tool results
+            if tools and not has_tool_results:
                 payload["tools"] = tools
-                payload["tool_choice"] = "auto"
-                logger.info("Providing all tools to LLM - let LLM choose the appropriate one")
-            elif tools and not needs_tools:
-                logger.info("Tools available but withheld - query appears conversational")
+                payload["tool_choice"] = "auto"  # Groq only supports 'auto'
+                
+                if needs_forced_tools:
+                    logger.info("Detected follow-up query that needs tools")
+                else:
+                    logger.info("Providing tools to LLM for decision")
             else:
-                logger.info("No tools available or query doesn't need tools")
+                logger.info("Generating response without tools (tool results present)")
             
             response = self.client.chat.completions.create(**payload)
             return response
@@ -75,20 +71,34 @@ class GroqClient:
             raise
     
     def _should_use_tools(self, query: str) -> bool:
-        """Determine if query needs tools using simple pattern matching"""
+        """Determine if query needs tools - now more permissive for follow-ups"""
         query_lower = query.lower().strip()
         
-        # Skip tools for clearly conversational queries
-        conversational_patterns = [
-            r'^(hi|hello|hey|good morning|good afternoon|thank you|thanks|ok|okay|yes|no|bye|goodbye)\b',
-            r'^(how are you|what\'s up|how\'s it going)\b',
+        # Only skip tools for very clear greetings
+        pure_greetings = [
+            r'^(hi|hello|hey|good morning|good afternoon|goodbye|bye)$',
+            r'^(thank you|thanks|ok|okay)$',
         ]
         
-        for pattern in conversational_patterns:
+        for pattern in pure_greetings:
             if re.match(pattern, query_lower):
                 return False
         
-        # Use tools for medical/patient queries
+        # IMPORTANT: Follow-up patterns that NEED tools
+        follow_up_patterns = [
+            r'\btheir\b',  # "their medications", "their conditions"
+            r'\babout\b',  # "what about..."
+            r'\band\b.*\b(information|details|data)\b',  # "and their information"
+            r'\balso\b',  # "also show me"
+            r'\bmore\b',  # "more details"
+        ]
+        
+        for pattern in follow_up_patterns:
+            if re.search(pattern, query_lower):
+                logger.info(f"Follow-up query detected with pattern: {pattern}")
+                return True
+        
+        # Medical patterns
         medical_patterns = [
             r'\bpatient\b', r'\bmedical\b', r'\bconditions?\b', r'\bdiagnos\w+\b',
             r'\bmedications?\b', r'\bobservations?\b', r'\ballerg\w+\b',
@@ -96,11 +106,7 @@ class GroqClient:
             r'\bresults?\b', r'\btests?\b', r'\bblood\b', r'\bpressure\b',
             r'\bweight\b', r'\bheight\b', r'\bdiseases?\b', r'\billness\b',
             r'\bprescription\b', r'\bdrugs?\b', r'\bmedicines?\b', r'\bpills?\b',
-            r'\bwhat\b.*\b(condition|medication|vital|allerg|diagnos)\b',
-            r'\bshow\b.*\b(patient|medical|condition|medication)\b',
-            r'\btell me\b.*\b(about|condition|medication|patient)\b',
-            # Arabic patterns
-            r'\bمريض\b', r'\bحالة\b', r'\bأدوية\b', r'\bضغط\b', r'\bفحوصات\b'
+            r'\binformation\b', r'\bdetails?\b', r'\bdata\b',
         ]
         
         for pattern in medical_patterns:
@@ -108,9 +114,9 @@ class GroqClient:
                 logger.info(f"Medical query detected with pattern: {pattern}")
                 return True
         
-        # Default: use tools for questions that might need data
+        # Questions almost always need tools
         question_patterns = [
-            r'\b(what|how|when|where|which|who|show|display|get|tell me|give me)\b'
+            r'\b(what|how|when|where|which|who|show|display|get|tell|give)\b'
         ]
         
         for pattern in question_patterns:
@@ -118,7 +124,9 @@ class GroqClient:
                 logger.info("Question detected - providing tools")
                 return True
         
-        return False
+        # Default to true for safety - let LLM decide
+        logger.info("Uncertain query - providing tools to be safe")
+        return True
     
     def _looks_like_json_data(self, text: str) -> bool:
         """Check if text looks like JSON tool result data"""
@@ -128,4 +136,28 @@ class GroqClient:
             return True
         if text.startswith('{') and len(text) > 200:  # Large JSON objects
             return True
+        return False
+    
+    def _is_medical_follow_up(self, query: str, messages: List[Dict[str, Any]]) -> bool:
+        """Determine if this is a follow-up query that needs tools"""
+        query_lower = query.lower().strip()
+        
+        # Check for pronouns and references that indicate follow-up
+        follow_up_indicators = [
+            'their', 'his', 'her', 'the patient', 'this patient',
+            'what about', 'and', 'also', 'show me more',
+            'conditions', 'medications', 'medication', 'drugs',
+            'observations', 'allergies', 'information', 'details',
+            'vitals', 'labs', 'results'
+        ]
+        
+        for indicator in follow_up_indicators:
+            if indicator in query_lower:
+                # Check if we have a patient context in recent messages
+                for msg in messages[-10:]:
+                    content = str(msg.get('content', '')).lower()
+                    if 'patient' in content and any(char.isdigit() for char in content):
+                        logger.info(f"Follow-up query detected: '{indicator}' found with patient context")
+                        return True
+        
         return False
