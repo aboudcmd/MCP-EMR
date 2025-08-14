@@ -20,13 +20,11 @@ class GroqClient:
         """Send chat request to Groq with tools"""
         try:
             # Intelligent query analysis - only for user messages, not tool results
-            # Intelligent query analysis - only for user messages, not tool results
             needs_tools = False
             force_specific_tool = None
             
             if messages and tools:  # Only analyze if tools are provided
                 last_user_msg = messages[-1].get('content', '')
-                last_user_role = messages[-1].get('role', '')
                 last_user_role = messages[-1].get('role', '')
                 
                 # Skip semantic analysis for tool results or JSON data
@@ -140,16 +138,6 @@ class GroqClient:
         except Exception as e:
             logger.error(f"Groq completion error: {e}")
             raise
-    
-    def _looks_like_json_data(self, text: str) -> bool:
-        """Check if text looks like JSON tool result data"""
-        text = text.strip()
-        # Check if it starts with JSON-like structure
-        if text.startswith('{') and '"total":' in text and '"observations":' in text:
-            return True
-        if text.startswith('{') and len(text) > 200:  # Large JSON objects
-            return True
-        return False
     
     def _looks_like_json_data(self, text: str) -> bool:
         """Check if text looks like JSON tool result data"""
