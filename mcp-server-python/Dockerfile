@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py ./
 
 # Expose port for HTTP service
-EXPOSE 8001
+EXPOSE 8888
 
-# Run as HTTP service instead of subprocess
-CMD ["python", "http_server.py"]
+# Run the MCP server
+CMD ["python", "main.py"]

@@ -35,3 +35,7 @@ logs/
 fhir-data/
 
 test_spark_fhir.py
+
+sample-data/
+
+scripts/

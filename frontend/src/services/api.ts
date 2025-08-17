@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { Message } from '../components/ChatInterface';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_URL = '';
 
 export async function sendMessage(
   message: string,

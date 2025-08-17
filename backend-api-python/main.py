@@ -31,7 +31,7 @@ app = FastAPI(title="EMR Backend API", version="1.0.0")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("CORS_ORIGIN", "http://localhost:3000")],
+    allow_origins=[os.getenv("CORS_ORIGIN", "http://10.7.1.9:3004")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,12 +40,11 @@ app.add_middleware(
 # Initialize clients
 groq_client = GroqClient(os.getenv("GROQ_API_KEY", ""))
 mcp_client = HTTPMCPClient(
-    mcp_server_url=os.getenv("MCP_SERVER_URL", "http://localhost:8001")
+    mcp_server_url=os.getenv("MCP_SERVER_URL", "http://localhost:8888")
 )
 
 # Global variables for conversation management  
 max_context_length = 15  # Keep last 15 messages to prevent context exhaustion
-current_patient_context = {}  # Track current patient ID per session
 
 # Request/Response models
 class Message(BaseModel):
@@ -207,15 +206,6 @@ TOOLS = [
     },
 ]
 
-# SYSTEM_PROMPT = """You are an EMR assistant. 
-
-# MANDATORY RULE: When asked about patient medications, you MUST ALWAYS call get_patient_medications tool.
-# When asked about conditions/diagnoses, you MUST ALWAYS call get_patient_conditions tool.
-# When asked about observations/vitals, you MUST ALWAYS call get_patient_observations tool.
-
-# You cannot answer medical questions without calling the appropriate tool first.
-# """
-
 SYSTEM_PROMPT = """You are an EMR (Electronic Medical Records) assistant. You MUST follow these rules WITHOUT EXCEPTION:
 
 🚨 MANDATORY RULES:
@@ -251,7 +241,7 @@ async def health_check():
         "timestamp": datetime.utcnow().isoformat(),
         "services": {
             "backend": "running",
-            "port": int(os.getenv("PORT", 3001))
+            "port": int(os.getenv("PORT", 8004))
         }
     }
 
@@ -270,9 +260,7 @@ async def chat(request: ChatRequest):
             if patient_id:
                 logger.info(f"Extracted patient ID from message: {patient_id}")
         
-        # Validate patient ID format if provided
-        if patient_id and not _validate_patient_id(patient_id):
-            raise HTTPException(status_code=400, detail="Invalid patient ID format. Must be 4-7 digits.")
+        # Patient ID validation removed - accept any format
         
         if patient_id:
             logger.info(f"Processing request for patient: {patient_id}")
@@ -902,7 +890,7 @@ def _validate_patient_id(patient_id: str) -> bool:
     # Check if it's a valid MRN format (adjust based on your system)
     # For now, accept numeric IDs of 4-7 digits
     import re
-    pattern = r'^\d{4,7}$'
+    pattern = r'^\d{1,15}$'
     return bool(re.match(pattern, patient_id))
 
 @app.on_event("startup")
@@ -928,5 +916,5 @@ async def shutdown_event():
 
 if __name__ == "__main__":
    import uvicorn
-   port = int(os.getenv("PORT", 3001))
+   port = int(os.getenv("PORT", 8004))
    uvicorn.run(app, host="0.0.0.0", port=port)
