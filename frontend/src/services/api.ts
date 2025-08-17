@@ -10,12 +10,10 @@ export async function sendMessage(
 ) {
   const requestBody: any = {
     message,
-    conversationHistory: conversationHistory
-      .filter((m) => m.role !== 'system')
-      .map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
+    conversationHistory: conversationHistory.map((m) => ({
+      role: m.role,
+      content: m.content,
+    })),
   };
 
   // Add patientId if provided
