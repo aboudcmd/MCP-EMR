@@ -47,7 +47,6 @@ services:
       # Use relative URL for API calls through nginx proxy
       VITE_API_URL: "http://localhost:8004"
     depends_on:
-    
       - backend-api
     networks:
       - emr-network
