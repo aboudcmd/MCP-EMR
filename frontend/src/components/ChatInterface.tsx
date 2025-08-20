@@ -36,7 +36,7 @@ export default function ChatInterface() {
 
     try {
       const updatedMessages = [...messages, userMessage];
-      const response = await sendMessage(content, updatedMessages, patientId);
+      const response = await sendMessage(content, patientId);
       
       const assistantMessage: Message = {
         id: updatedMessages.length + 1,

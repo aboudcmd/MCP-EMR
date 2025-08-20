@@ -1,27 +1,40 @@
 import axios from 'axios';
-import { Message } from '../components/ChatInterface';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8004';
+
+// Store session ID in localStorage
+let sessionId: string | null = localStorage.getItem('emr_session_id');
 
 export async function sendMessage(
   message: string,
-  conversationHistory: Message[],
   patientId?: string
 ) {
   const requestBody: any = {
     message,
-    conversationHistory: conversationHistory.map((m) => ({
-      role: m.role,
-      content: m.content,
-    })),
+    sessionId,
+    patientId: patientId?.trim() || undefined
   };
 
-  // Add patientId if provided
-  if (patientId && patientId.trim()) {
-    requestBody.patientId = patientId.trim();
+  try {
+    const response = await axios.post(`${API_URL}/api/chat`, requestBody);
+    
+    // Store session ID if new one created
+    if (response.data.sessionId && response.data.sessionId !== sessionId) {
+      sessionId = response.data.sessionId;
+      localStorage.setItem('emr_session_id', sessionId);
+    }
+    
+    return response.data;
+  } catch (error) {
+    console.error('API Error:', error);
+    throw error;
   }
+}
 
-  const response = await axios.post(`${API_URL}/api/chat`, requestBody);
-
-  return response.data;
+export function clearSession() {
+  if (sessionId) {
+    axios.delete(`${API_URL}/api/session/${sessionId}`).catch(console.error);
+    localStorage.removeItem('emr_session_id');
+    sessionId = null;
+  }
 }

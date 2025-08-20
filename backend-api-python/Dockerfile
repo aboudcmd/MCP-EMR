@@ -11,5 +11,6 @@ COPY *.py ./
 
 EXPOSE 8004
 
-# Run with reload for development, remove --reload for production
+# Use the new v2 backend with proper logging
+# Remove --reload for production deployment
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004", "--reload"]

@@ -14,6 +14,7 @@ services:
       # point at the external Spark FHIR server
       FHIR_SERVER_URL: http://10.201.205.101:8007/
       MCP_PORT: 8888
+      PYTHONUNBUFFERED: 1  # Force Python to flush output immediately
     networks:
       - emr-network
 
@@ -30,6 +31,7 @@ services:
       MCP_SERVER_URL: http://mcp-server:8888
       FHIR_SERVER_URL: http://10.201.205.101:8007/
       CORS_ORIGIN:    http://localhost:3004
+      PYTHONUNBUFFERED: 1  # Force Python to flush output immediately
     depends_on:
       - mcp-server
     networks:

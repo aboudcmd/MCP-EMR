@@ -52,11 +52,20 @@ async def health_check():
 async def execute_tool_endpoint(request: ToolRequest):
     """Execute a tool via HTTP"""
     try:
-        logger.info(f"Executing tool {request.tool_name} with args: {request.args}")
+        logger.info("="*60)
+        logger.info(f"MCP SERVER: NEW TOOL REQUEST")
+        logger.info(f"Tool Name: {request.tool_name}")
+        logger.info(f"Arguments: {request.args}")
+        logger.info("="*60)
         
         result = await execute_tool(request.tool_name, request.args)
         
-        logger.info(f"Tool {request.tool_name} executed successfully")
+        logger.info(f"✅ MCP SERVER: Tool {request.tool_name} executed successfully")
+        logger.info(f"Result type: {type(result)}")
+        if isinstance(result, dict):
+            logger.info(f"Result keys: {list(result.keys())}")
+        elif isinstance(result, list):
+            logger.info(f"Result length: {len(result)}")
         return ToolResponse(success=True, result=result)
         
     except Exception as e:
@@ -67,7 +76,7 @@ async def execute_tool(tool_name: str, args: dict):
     """Execute a tool based on its name and arguments"""
     
     try:
-        logger.info(f"Executing tool {tool_name} with args: {args}")
+        logger.info(f"MCP: Processing {tool_name} internally...")
         
         if tool_name == "search_patients":
             result = await fhir_client.search_patients(SearchPatientsArgs(**args))
@@ -107,7 +116,8 @@ async def execute_tool(tool_name: str, args: dict):
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
         
-        logger.info(f"Tool {tool_name} executed successfully")
+        logger.info(f"✅ MCP: Tool {tool_name} internal execution complete")
+        logger.info(f"MCP: Returning result of type {type(result)}")
         return result
         
     except Exception as e:

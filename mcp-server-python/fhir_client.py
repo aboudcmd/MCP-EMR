@@ -39,19 +39,25 @@ class FHIRClient:
             # Prepare headers
             headers = self.headers.copy()
             
+            logger.info("="*40)
+            logger.info(f"FHIR CLIENT: Making request to FHIR server")
+            logger.info(f"Method: {method}")
+            logger.info(f"URL: {url}")
+            
             if form_data:
                 # POST request with form data
                 headers["Content-Type"] = "application/x-www-form-urlencoded"
-                logger.info(f"Making FHIR request: {method} {url} with form data: {form_data}")
+                logger.info(f"Form data: {form_data}")
                 response = await client.request(method, url, data=form_data, headers=headers)
             else:
                 # GET request with query parameters
                 if params:
                     url = f"{url}?{urlencode(params)}"
-                logger.info(f"Making FHIR request: {method} {url}")
+                    logger.info(f"Query params: {params}")
+                logger.info(f"Full URL: {url}")
                 response = await client.request(method, url, headers=headers)
             
-            logger.info(f"FHIR response status: {response.status_code}")
+            logger.info(f"✅ FHIR response status: {response.status_code}")
             
             response.raise_for_status()
             result = response.json()
@@ -60,7 +66,14 @@ class FHIRClient:
             if isinstance(result, dict):
                 total = result.get('total', 'unknown')
                 entry_count = len(result.get('entry', []))
-                logger.info(f"FHIR response: total={total}, entries={entry_count}")
+                logger.info(f"FHIR response summary: total={total}, entries={entry_count}")
+                if 'resourceType' in result:
+                    logger.info(f"Resource type: {result['resourceType']}")
+            elif isinstance(result, list):
+                logger.info(f"FHIR response: list with {len(result)} items")
+            else:
+                logger.info(f"FHIR response type: {type(result)}")
+            logger.info("="*40)
             
             return result
     

@@ -23,7 +23,12 @@ class HTTPMCPClient:
             else:
                 args_dict = args
             
-            logger.info(f"Executing tool {tool_name} with args: {args_dict}")
+            logger.info("="*40)
+            logger.info(f"HTTP MCP CLIENT: Calling MCP server")
+            logger.info(f"Tool: {tool_name}")
+            logger.info(f"Args: {args_dict}")
+            logger.info(f"MCP Server URL: {self.mcp_server_url}")
+            logger.info("="*40)
             
             # Make HTTP request to MCP server
             response = await self.client.post(
@@ -46,10 +51,12 @@ class HTTPMCPClient:
             
             # Log result summary (truncate for readability)
             result_str = str(tool_result)
+            logger.info(f"✅ HTTP MCP CLIENT: Got response from MCP server")
+            logger.info(f"Response type: {type(tool_result)}")
             if len(result_str) > 500:
-                logger.info(f"Tool {tool_name} returned: {result_str[:500]}...")
+                logger.info(f"Response preview: {result_str[:500]}...")
             else:
-                logger.info(f"Tool {tool_name} returned: {result_str}")
+                logger.info(f"Response: {result_str}")
             
             return tool_result
             
