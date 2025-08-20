@@ -13,4 +13,4 @@ EXPOSE 8004
 
 # Use the new v2 backend with proper logging
 # Remove --reload for production deployment
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004", "--reload"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004", "--reload", "--log-level", "info", "--access-log"]

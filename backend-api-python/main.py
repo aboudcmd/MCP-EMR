@@ -1,7 +1,7 @@
-# backend-api-python/main_v2.py
+# backend-api-python/main.py
 """
-Production-ready EMR Backend API with proper MCP integration
-No keyword matching, no forced tool usage - let the LLM work naturally
+Production-ready EMR Backend API with session-based conversation management
+Anti-hallucination measures and proper logging for frontend integration
 """
 import os
 import json
@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import sys
+import uuid
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,17 +25,28 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout)  # Force stdout
-    ]
+        logging.StreamHandler(sys.stdout)
+    ],
+    force=True  # Override any existing configuration
 )
+
+# Set up logger
 logger = logging.getLogger(__name__)
+
+# Force all loggers to use our configuration
+logging.getLogger().handlers.clear()
+logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+logging.getLogger().setLevel(logging.INFO)
 
 # Load environment variables
 root_dir = Path(__file__).parent.parent
 load_dotenv(root_dir / '.env')
 
 # Initialize FastAPI app
-app = FastAPI(title="EMR Backend API", version="2.0.0")
+app = FastAPI(title="EMR Backend API", version="3.0.0")
+
+# In-memory session storage (replace with Redis/database in production)
+sessions = {}
 
 # Configure CORS
 app.add_middleware(
@@ -58,18 +70,19 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    sessionId: Optional[str] = Field(
+        default=None,
+        description="Session ID for conversation continuity"
+    )
     patientId: Optional[str] = Field(
         default=None,
         description="Patient context for the conversation"
     )
-    conversationHistory: List[Message] = Field(
-        default=[],
-        description="Previous messages for context"
-    )
 
 class ChatResponse(BaseModel):
     response: str
-    conversationHistory: List[Message]
+    sessionId: str
+    patientId: Optional[str]
 
 # Tool definitions - Clean and semantic, no forcing
 TOOLS = [
@@ -179,18 +192,54 @@ TOOLS = [
     },
 ]
 
-# Simplified, natural system prompt
-SYSTEM_PROMPT = """You are an EMR (Electronic Medical Records) assistant with access to patient data through various tools.
+# Anti-hallucination system prompt
+SYSTEM_PROMPT = """You are an EMR (Electronic Medical Records) assistant. You MUST follow these rules EXACTLY:
 
-When users ask about medical information, use the appropriate tools to retrieve accurate, up-to-date data from the EMR system.
+ABSOLUTE REQUIREMENTS - NEVER VIOLATE THESE:
+1. NEVER invent, create, or hallucinate ANY patient information
+2. NEVER provide patient names, IDs, diagnoses, or any medical data without retrieving it from tools
+3. ALWAYS use tools for ANY patient-related query - no exceptions
+4. If no patient ID is provided, you MUST ask for it first
+5. If tools return empty/no data, you MUST say "No data found" - do not fill in gaps
 
-Important guidelines:
-- Always use tools to retrieve medical data rather than relying on general knowledge
-- If a tool returns no data, inform the user clearly
-- Present information in a clear, organized manner
-- Maintain patient privacy and confidentiality
+WHEN RESPONDING:
+- For discharge summaries: Only include data that was ACTUALLY retrieved from tools
+- For patient queries: Only report what the tools return
+- If asked to create documents without patient ID: Say "I need a patient ID to retrieve the necessary information"
+- If tools return empty results: Say "No records found for this patient/query"
 
-You have access to tools for searching patients, retrieving conditions, medications, observations, allergies, and other medical data."""
+TOOL USAGE:
+- You have access to: search_patients, get_patient_details, get_patient_conditions, get_patient_medications, get_patient_observations, get_patient_allergies
+- Use these tools for ALL patient data retrieval
+- Never assume or guess patient information
+
+FORBIDDEN ACTIONS:
+- Creating fictional patient names or IDs
+- Inventing medical diagnoses or conditions
+- Making up dates, vital signs, or lab results
+- Providing generic medical advice as if it's specific patient data
+
+Remember: Every piece of patient information MUST come from tool responses. If you don't have the data, say so."""
+
+def get_or_create_session(session_id: Optional[str]) -> tuple[str, dict]:
+    """Get existing session or create new one"""
+    if session_id and session_id in sessions:
+        return session_id, sessions[session_id]
+    
+    new_session_id = str(uuid.uuid4())
+    sessions[new_session_id] = {
+        "history": [],
+        "patient_id": None,
+        "created_at": datetime.utcnow().isoformat()
+    }
+    return new_session_id, sessions[new_session_id]
+
+def validate_patient_context(patient_id: Optional[str], session: dict) -> Optional[str]:
+    """Validate and update patient context"""
+    if patient_id:
+        session["patient_id"] = patient_id
+        return patient_id
+    return session.get("patient_id")
 
 @app.get("/health")
 async def health_check():
@@ -199,130 +248,179 @@ async def health_check():
     return {
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat(),
-        "version": "2.0.0"
+        "version": "3.0.0"
     }
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Handle chat requests with improved architecture"""
+    """Handle chat requests with session-based management and anti-hallucination"""
     try:
+        print(f"\n{'='*60}", flush=True)
+        print(f"NEW CHAT REQUEST", flush=True) 
+        print(f"Message: {request.message}", flush=True)
+        print(f"Session ID: {request.sessionId}", flush=True)
+        print(f"Patient ID: {request.patientId}", flush=True)
+        print(f"{'='*60}\n", flush=True)
+        
         logger.info(f"\n{'='*60}")
         logger.info(f"NEW CHAT REQUEST")
         logger.info(f"Message: {request.message}")
+        logger.info(f"Session ID: {request.sessionId}")
         logger.info(f"Patient ID: {request.patientId}")
-        logger.info(f"History length: {len(request.conversationHistory)}")
         logger.info(f"{'='*60}\n")
         
-        # Build conversation with context
+        # Get or create session
+        session_id, session = get_or_create_session(request.sessionId)
+        
+        # Validate patient context
+        current_patient_id = validate_patient_context(request.patientId, session)
+        
+        # Build conversation with strict context
         messages = []
         
-        # Add system prompt with patient context if available
+        # Add system prompt with current patient context
         system_content = SYSTEM_PROMPT
-        if request.patientId:
-            system_content += f"\n\nCurrent patient context: Patient ID {request.patientId}"
+        if current_patient_id:
+            system_content += f"\n\nCURRENT CONTEXT: Patient ID {current_patient_id} is selected. Use this ID for all patient-related queries unless a different ID is explicitly mentioned."
+        else:
+            system_content += "\n\nCURRENT CONTEXT: No patient ID selected. Ask for patient ID before retrieving any medical information."
         
         messages.append({"role": "system", "content": system_content})
         
-        # Add conversation history (limited to prevent token exhaustion)
-        MAX_HISTORY = 20
-        history = request.conversationHistory[-MAX_HISTORY:] if len(request.conversationHistory) > MAX_HISTORY else request.conversationHistory
-        
-        for msg in history:
-            messages.append({"role": msg.role, "content": msg.content})
+        # Add conversation history from session (server-side managed)
+        for msg in session["history"][-10:]:  # Limit history to last 10 messages
+            messages.append({"role": msg["role"], "content": msg["content"]})
         
         # Add current message
         messages.append({"role": "user", "content": request.message})
         
-        # Get LLM response with tools
-        logger.info("Calling LLM with tools available...")
-        response = await groq_client.chat(messages, TOOLS, SYSTEM_PROMPT)
-        response_message = response.choices[0].message
+        # Check if user is asking for patient info without ID
+        needs_patient_id = any(keyword in request.message.lower() for keyword in [
+            'discharge', 'summary', 'patient', 'medication', 'condition', 
+            'diagnosis', 'allergy', 'vital', 'observation'
+        ])
         
-        # Process tool calls if any
-        if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
-            logger.info(f"LLM using {len(response_message.tool_calls)} tools")
-            
-            # Add assistant's tool call message
-            messages.append({
-                "role": "assistant",
-                "content": response_message.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    } for tc in response_message.tool_calls
-                ]
-            })
-            
-            # Execute tools and collect results
-            for tool_call in response_message.tool_calls:
-                try:
-                    logger.info(f"Executing tool: {tool_call.function.name}")
-                    
-                    # Parse arguments
-                    args = json.loads(tool_call.function.arguments)
-                    
-                    # If no patient ID in args but we have context, add it
-                    if request.patientId and 'patientId' not in args and tool_call.function.name != 'search_patients':
-                        args['patientId'] = request.patientId
-                    
-                    # Execute tool
-                    result = await mcp_client.execute_tool(
-                        tool_call.function.name,
-                        args
-                    )
-                    
-                    logger.info(f"Tool {tool_call.function.name} completed")
-                    
-                    # Add tool result
-                    messages.append({
-                        "role": "tool",
-                        "content": json.dumps(result) if not isinstance(result, str) else result,
-                        "tool_call_id": tool_call.id,
-                    })
-                    
-                except Exception as e:
-                    logger.error(f"Tool error: {e}")
-                    messages.append({
-                        "role": "tool",
-                        "content": json.dumps({"error": str(e)}),
-                        "tool_call_id": tool_call.id,
-                    })
-            
-            # Get final response from LLM
-            logger.info("Getting final response from LLM...")
-            final_response = await groq_client.chat(messages, [], SYSTEM_PROMPT)
-            final_content = final_response.choices[0].message.content
+        if needs_patient_id and not current_patient_id and "search" not in request.message.lower():
+            # Immediately ask for patient ID without calling LLM
+            response_content = "I need a patient ID to retrieve medical information. Please provide the patient ID or search for a patient first."
         else:
-            # Direct response without tools
-            logger.info("LLM responded without using tools")
-            final_content = response_message.content
+            # Get LLM response with tools
+            logger.info("Calling LLM with strict anti-hallucination prompt...")
+            response = await groq_client.chat(messages, TOOLS, system_content)
+            response_message = response.choices[0].message
+            
+            # Process tool calls if any
+            if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
+                logger.info(f"LLM using {len(response_message.tool_calls)} tools")
+                
+                # Add assistant's tool call message
+                messages.append({
+                    "role": "assistant",
+                    "content": response_message.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in response_message.tool_calls
+                    ]
+                })
+                
+                # Execute tools and collect results
+                tool_results = []
+                for tool_call in response_message.tool_calls:
+                    try:
+                        logger.info(f"Executing tool: {tool_call.function.name}")
+                        
+                        # Parse arguments
+                        args = json.loads(tool_call.function.arguments)
+                        
+                        # Auto-inject patient ID if available and not provided
+                        if current_patient_id and 'patientId' not in args and tool_call.function.name != 'search_patients':
+                            args['patientId'] = current_patient_id
+                        
+                        # Execute tool
+                        result = await mcp_client.execute_tool(
+                            tool_call.function.name,
+                            args
+                        )
+                        
+                        logger.info(f"Tool {tool_call.function.name} completed")
+                        tool_results.append(result)
+                        
+                        # Add tool result to messages
+                        messages.append({
+                            "role": "tool",
+                            "content": json.dumps(result) if not isinstance(result, str) else result,
+                            "tool_call_id": tool_call.id,
+                        })
+                        
+                    except Exception as e:
+                        logger.error(f"Tool error: {e}")
+                        error_result = {"error": str(e)}
+                        tool_results.append(error_result)
+                        messages.append({
+                            "role": "tool",
+                            "content": json.dumps(error_result),
+                            "tool_call_id": tool_call.id,
+                        })
+                
+                # Check if all tools returned empty results
+                all_empty = all(
+                    (isinstance(r, dict) and (r.get('total') == 0 or r.get('results') == [] or r == {}))
+                    for r in tool_results
+                )
+                
+                if all_empty:
+                    # Force a "no data found" response
+                    logger.info("All tools returned empty results, enforcing 'no data found' response")
+                    response_content = "No data was found in the EMR system for this query. The patient may not have records for the requested information, or the patient ID may not exist in the system."
+                else:
+                    # Get final response from LLM with tool results
+                    logger.info("Getting final response from LLM with tool results...")
+                    final_response = await groq_client.chat(messages, [], system_content)
+                    response_content = final_response.choices[0].message.content
+            else:
+                # Direct response without tools
+                logger.info("LLM responded without using tools")
+                response_content = response_message.content
         
-        # Update conversation history
-        updated_history = list(request.conversationHistory) + [
-            Message(role="user", content=request.message),
-            Message(role="assistant", content=final_content)
-        ]
+        # Update session history (server-side)
+        session["history"].append({"role": "user", "content": request.message})
+        session["history"].append({"role": "assistant", "content": response_content})
+        
+        # Keep session size manageable
+        if len(session["history"]) > 20:
+            session["history"] = session["history"][-20:]
         
         logger.info(f"Response generated successfully\n{'='*60}\n")
         
         return ChatResponse(
-            response=final_content,
-            conversationHistory=updated_history
+            response=response_content,
+            sessionId=session_id,
+            patientId=current_patient_id
         )
         
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/api/session/{session_id}")
+async def clear_session(session_id: str):
+    """Clear a specific session"""
+    if session_id in sessions:
+        del sessions[session_id]
+        logger.info(f"Session {session_id} cleared")
+        return {"status": "session cleared"}
+    return {"status": "session not found"}
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup"""
-    logger.info("Starting EMR Backend API v2.0...")
+    logger.info("Starting EMR Backend API v3.0...")
     try:
         is_healthy = await mcp_client.health_check()
         if is_healthy:

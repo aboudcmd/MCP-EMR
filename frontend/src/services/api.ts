@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8004';
+const API_URL = 'http://localhost:8004';
 
 // Store session ID in localStorage
 let sessionId: string | null = localStorage.getItem('emr_session_id');
@@ -19,9 +19,9 @@ export async function sendMessage(
     const response = await axios.post(`${API_URL}/api/chat`, requestBody);
     
     // Store session ID if new one created
-    if (response.data.sessionId && response.data.sessionId !== sessionId) {
+    if (response.data.sessionId) {
       sessionId = response.data.sessionId;
-      localStorage.setItem('emr_session_id', sessionId);
+      localStorage.setItem('emr_session_id', response.data.sessionId);
     }
     
     return response.data;
