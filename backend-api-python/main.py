@@ -70,18 +70,13 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    sessionId: Optional[str] = Field(
-        default=None,
-        description="Session ID for conversation continuity"
-    )
     patientId: Optional[str] = Field(
         default=None,
-        description="Patient context for the conversation"
+        description="Patient ID - creates/uses patient-scoped session"
     )
 
 class ChatResponse(BaseModel):
     response: str
-    sessionId: str
     patientId: Optional[str]
 
 # Tool definitions - Clean and semantic, no forcing
@@ -221,25 +216,23 @@ FORBIDDEN ACTIONS:
 
 Remember: Every piece of patient information MUST come from tool responses. If you don't have the data, say so."""
 
-def get_or_create_session(session_id: Optional[str]) -> tuple[str, dict]:
-    """Get existing session or create new one"""
-    if session_id and session_id in sessions:
-        return session_id, sessions[session_id]
+def get_patient_session(patient_id: Optional[str]) -> tuple[Optional[str], dict]:
+    """Get or create session for specific patient"""
+    if not patient_id:
+        # Return empty session for general queries without patient context
+        return None, {"history": [], "patient_id": None}
     
-    new_session_id = str(uuid.uuid4())
-    sessions[new_session_id] = {
-        "history": [],
-        "patient_id": None,
-        "created_at": datetime.utcnow().isoformat()
-    }
-    return new_session_id, sessions[new_session_id]
-
-def validate_patient_context(patient_id: Optional[str], session: dict) -> Optional[str]:
-    """Validate and update patient context"""
-    if patient_id:
-        session["patient_id"] = patient_id
-        return patient_id
-    return session.get("patient_id")
+    session_key = f"patient_{patient_id}"
+    
+    if session_key not in sessions:
+        sessions[session_key] = {
+            "history": [],
+            "patient_id": patient_id,
+            "created_at": datetime.utcnow().isoformat()
+        }
+        logger.info(f"Created new session for patient {patient_id}")
+    
+    return patient_id, sessions[session_key]
 
 @app.get("/health")
 async def health_check():
@@ -258,22 +251,17 @@ async def chat(request: ChatRequest):
         print(f"\n{'='*60}", flush=True)
         print(f"NEW CHAT REQUEST", flush=True) 
         print(f"Message: {request.message}", flush=True)
-        print(f"Session ID: {request.sessionId}", flush=True)
         print(f"Patient ID: {request.patientId}", flush=True)
         print(f"{'='*60}\n", flush=True)
         
         logger.info(f"\n{'='*60}")
         logger.info(f"NEW CHAT REQUEST")
         logger.info(f"Message: {request.message}")
-        logger.info(f"Session ID: {request.sessionId}")
         logger.info(f"Patient ID: {request.patientId}")
         logger.info(f"{'='*60}\n")
         
-        # Get or create session
-        session_id, session = get_or_create_session(request.sessionId)
-        
-        # Validate patient context
-        current_patient_id = validate_patient_context(request.patientId, session)
+        # Get patient-scoped session
+        current_patient_id, session = get_patient_session(request.patientId)
         
         # Build conversation with strict context
         messages = []
@@ -400,7 +388,6 @@ async def chat(request: ChatRequest):
         
         return ChatResponse(
             response=response_content,
-            sessionId=session_id,
             patientId=current_patient_id
         )
         
@@ -408,14 +395,15 @@ async def chat(request: ChatRequest):
         logger.error(f"Chat error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/session/{session_id}")
-async def clear_session(session_id: str):
-    """Clear a specific session"""
-    if session_id in sessions:
-        del sessions[session_id]
-        logger.info(f"Session {session_id} cleared")
-        return {"status": "session cleared"}
-    return {"status": "session not found"}
+@app.delete("/api/patient/{patient_id}/session")
+async def clear_patient_session(patient_id: str):
+    """Clear conversation history for a specific patient"""
+    session_key = f"patient_{patient_id}"
+    if session_key in sessions:
+        del sessions[session_key]
+        logger.info(f"Session for patient {patient_id} cleared")
+        return {"status": "patient session cleared", "patientId": patient_id}
+    return {"status": "patient session not found", "patientId": patient_id}
 
 @app.on_event("startup")
 async def startup_event():
