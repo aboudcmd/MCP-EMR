@@ -1,7 +1,6 @@
-# backend-api-python/main.py
+# backend-api-python/main_v3.py
 """
-Production-ready EMR Backend API with session-based conversation management
-Anti-hallucination measures and proper logging for frontend integration
+Production-ready EMR Backend API v3 with strict anti-hallucination measures
 """
 import os
 import json
@@ -20,23 +19,15 @@ from dotenv import load_dotenv
 from groq_client import GroqClient
 from http_mcp_client import HTTPMCPClient
 
-# Configure logging to ensure immediate output
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout)
-    ],
-    force=True  # Override any existing configuration
+    ]
 )
-
-# Set up logger
 logger = logging.getLogger(__name__)
-
-# Force all loggers to use our configuration
-logging.getLogger().handlers.clear()
-logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
-logging.getLogger().setLevel(logging.INFO)
 
 # Load environment variables
 root_dir = Path(__file__).parent.parent
@@ -44,9 +35,6 @@ load_dotenv(root_dir / '.env')
 
 # Initialize FastAPI app
 app = FastAPI(title="EMR Backend API", version="3.0.0")
-
-# In-memory session storage (replace with Redis/database in production)
-sessions = {}
 
 # Configure CORS
 app.add_middleware(
@@ -63,6 +51,9 @@ mcp_client = HTTPMCPClient(
     mcp_server_url=os.getenv("MCP_SERVER_URL", "http://localhost:8888")
 )
 
+# In-memory session storage (replace with Redis/database in production)
+sessions = {}
+
 # Request/Response models
 class Message(BaseModel):
     role: str
@@ -70,16 +61,21 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    sessionId: Optional[str] = Field(
+        default=None,
+        description="Session ID for conversation continuity"
+    )
     patientId: Optional[str] = Field(
         default=None,
-        description="Patient ID - creates/uses patient-scoped session"
+        description="Patient context for the conversation"
     )
 
 class ChatResponse(BaseModel):
     response: str
+    sessionId: str
     patientId: Optional[str]
 
-# Tool definitions - Clean and semantic, no forcing
+# Tool definitions
 TOOLS = [
     {
         "type": "function",
@@ -187,7 +183,7 @@ TOOLS = [
     },
 ]
 
-# Anti-hallucination system prompt
+# CRITICAL: Anti-hallucination system prompt
 SYSTEM_PROMPT = """You are an EMR (Electronic Medical Records) assistant. You MUST follow these rules EXACTLY:
 
 ABSOLUTE REQUIREMENTS - NEVER VIOLATE THESE:
@@ -216,23 +212,25 @@ FORBIDDEN ACTIONS:
 
 Remember: Every piece of patient information MUST come from tool responses. If you don't have the data, say so."""
 
-def get_patient_session(patient_id: Optional[str]) -> tuple[Optional[str], dict]:
-    """Get or create session for specific patient"""
-    if not patient_id:
-        # Return empty session for general queries without patient context
-        return None, {"history": [], "patient_id": None}
+def get_or_create_session(session_id: Optional[str]) -> tuple[str, dict]:
+    """Get existing session or create new one"""
+    if session_id and session_id in sessions:
+        return session_id, sessions[session_id]
     
-    session_key = f"patient_{patient_id}"
-    
-    if session_key not in sessions:
-        sessions[session_key] = {
-            "history": [],
-            "patient_id": patient_id,
-            "created_at": datetime.utcnow().isoformat()
-        }
-        logger.info(f"Created new session for patient {patient_id}")
-    
-    return patient_id, sessions[session_key]
+    new_session_id = str(uuid.uuid4())
+    sessions[new_session_id] = {
+        "history": [],
+        "patient_id": None,
+        "created_at": datetime.utcnow().isoformat()
+    }
+    return new_session_id, sessions[new_session_id]
+
+def validate_patient_context(patient_id: Optional[str], session: dict) -> Optional[str]:
+    """Validate and update patient context"""
+    if patient_id:
+        session["patient_id"] = patient_id
+        return patient_id
+    return session.get("patient_id")
 
 @app.get("/health")
 async def health_check():
@@ -246,22 +244,20 @@ async def health_check():
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Handle chat requests with session-based management and anti-hallucination"""
+    """Handle chat requests with anti-hallucination measures"""
     try:
-        print(f"\n{'='*60}", flush=True)
-        print(f"NEW CHAT REQUEST", flush=True) 
-        print(f"Message: {request.message}", flush=True)
-        print(f"Patient ID: {request.patientId}", flush=True)
-        print(f"{'='*60}\n", flush=True)
-        
         logger.info(f"\n{'='*60}")
         logger.info(f"NEW CHAT REQUEST")
         logger.info(f"Message: {request.message}")
+        logger.info(f"Session ID: {request.sessionId}")
         logger.info(f"Patient ID: {request.patientId}")
         logger.info(f"{'='*60}\n")
         
-        # Get patient-scoped session
-        current_patient_id, session = get_patient_session(request.patientId)
+        # Get or create session
+        session_id, session = get_or_create_session(request.sessionId)
+        
+        # Validate patient context
+        current_patient_id = validate_patient_context(request.patientId, session)
         
         # Build conversation with strict context
         messages = []
@@ -269,21 +265,15 @@ async def chat(request: ChatRequest):
         # Add system prompt with current patient context
         system_content = SYSTEM_PROMPT
         if current_patient_id:
-            system_content += f"\n\nCURRENT CONTEXT: Patient ID {current_patient_id} is selected. You MUST use this patient ID ({current_patient_id}) for all medical queries. DO NOT ask for patient ID - it is already provided as {current_patient_id}."
-            print(f"✅ Patient context added: {current_patient_id}", flush=True)
+            system_content += f"\n\nCURRENT CONTEXT: Patient ID {current_patient_id} is selected. Use this ID for all patient-related queries unless a different ID is explicitly mentioned."
         else:
             system_content += "\n\nCURRENT CONTEXT: No patient ID selected. Ask for patient ID before retrieving any medical information."
-            print(f"❌ No patient context", flush=True)
         
         messages.append({"role": "system", "content": system_content})
-        print(f"📝 System prompt includes: Patient ID {current_patient_id}", flush=True)
         
         # Add conversation history from session (server-side managed)
-        history_messages = session["history"][-10:]  # Limit history to last 10 messages
-        print(f"💬 Adding {len(history_messages)} history messages", flush=True)
-        for msg in history_messages:
+        for msg in session["history"][-10:]:  # Limit history to last 10 messages
             messages.append({"role": msg["role"], "content": msg["content"]})
-            print(f"   {msg['role']}: {msg['content'][:50]}...", flush=True)
         
         # Add current message
         messages.append({"role": "user", "content": request.message})
@@ -394,6 +384,7 @@ async def chat(request: ChatRequest):
         
         return ChatResponse(
             response=response_content,
+            sessionId=session_id,
             patientId=current_patient_id
         )
         
@@ -401,15 +392,13 @@ async def chat(request: ChatRequest):
         logger.error(f"Chat error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/api/patient/{patient_id}/session")
-async def clear_patient_session(patient_id: str):
-    """Clear conversation history for a specific patient"""
-    session_key = f"patient_{patient_id}"
-    if session_key in sessions:
-        del sessions[session_key]
-        logger.info(f"Session for patient {patient_id} cleared")
-        return {"status": "patient session cleared", "patientId": patient_id}
-    return {"status": "patient session not found", "patientId": patient_id}
+@app.delete("/api/session/{session_id}")
+async def clear_session(session_id: str):
+    """Clear a specific session"""
+    if session_id in sessions:
+        del sessions[session_id]
+        return {"status": "session cleared"}
+    return {"status": "session not found"}
 
 @app.on_event("startup")
 async def startup_event():
