@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8004';
+const API_URL = 'http://10.7.1.9:8004';
 
 export async function sendMessage(
   message: string,
