@@ -97,8 +97,8 @@ class SessionService:
             ])
             
             # Keep session size manageable
-            if len(session_data.history) > settings.MAX_SESSION_HISTORY:
-                session_data.history = session_data.history[-settings.MAX_SESSION_HISTORY:]
+            if len(session_data.history) > settings.MAX_CONVERSATION_HISTORY:
+                session_data.history = session_data.history[-settings.MAX_CONVERSATION_HISTORY:]
             
             session_data.last_accessed = datetime.utcnow().isoformat()
             await self.session_store.set_session(session_key, session_data)

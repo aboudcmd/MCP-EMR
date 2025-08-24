@@ -39,7 +39,6 @@ class Settings(BaseSettings):
     # Production Settings
     WORKERS: int = 1
     SESSION_CLEANUP_INTERVAL: int = 3600  # 1 hour
-    MAX_SESSION_HISTORY: int = 20
     MAX_CONVERSATION_HISTORY: int = 10
     
     # Redis for production session storage (optional)
