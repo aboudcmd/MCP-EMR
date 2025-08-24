@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     
     # External Services (from .env)
     GROQ_API_KEY: str
-    FHIR_SERVER_URL: str = "http://10.201.205.101:8007/"
+    FHIR_SERVER_URL: str = "http://10.50.108.104:8007/"
     FHIR_AUTH_TOKEN: Optional[str] = None
     FHIR_USERNAME: Optional[str] = None
     FHIR_PASSWORD: Optional[str] = None
