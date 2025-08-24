@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     API_TITLE: str = "EMR Backend API"
     API_VERSION: str = "4.0.0"
     PORT: int = 8004
-    API_HOST: str = "0.0.0.0"
+    API_HOST: str = "10.7.1.9"
     LOG_LEVEL: str = "info"
     
     # External Services (from .env)
@@ -28,13 +28,13 @@ class Settings(BaseSettings):
     FHIR_PASSWORD: Optional[str] = None
     
     # MCP Server (auto-constructed from env)
-    MCP_SERVER_URL: str = "http://localhost:8888"
+    MCP_SERVER_URL: str = "http://10.7.1.9:8888"
     
     # CORS Settings (from .env)
-    CORS_ORIGIN: str = "http://localhost:3004"
+    CORS_ORIGIN: str = "http://10.7.1.9:3004"
     
     # Frontend (from .env)
-    VITE_API_URL: str = "http://localhost:8004"
+    VITE_API_URL: str = "http://10.7.1.9:8004"
     
     # Production Settings
     WORKERS: int = 1
