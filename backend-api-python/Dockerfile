@@ -1,16 +1,24 @@
 FROM python:3.11-slim
 
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
 WORKDIR /app
 
-# Install dependencies
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
-COPY *.py ./
+# Copy application code
+COPY . .
 
 EXPOSE 8004
 
-# Use the new v2 backend with proper logging
-# Remove --reload for production deployment
-CMD ["uvicorn", "main_v3:app", "--host", "0.0.0.0", "--port", "8004", "--reload", "--log-level", "info", "--access-log"]
+# Production command with multiple workers
+CMD ["uvicorn", "main_v4:app", "--host", "0.0.0.0", "--port", "8004", "--workers", "4"]

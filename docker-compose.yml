@@ -1,41 +1,62 @@
-
 name: mcp-emr
 
 services:
-  # Python MCP Server (HTTP Service)
+  # Redis for session storage
+  redis:
+    image: redis:7-alpine
+    container_name: emr-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - emr-network
+
+  # Python MCP Server
   mcp-server:
     build: ./mcp-server-python
     container_name: emr-mcp-server
     ports:
-      - "8888:8888"  # Expose MCP server HTTP API
+      - "8888:8888"
     env_file:
       - .env
     environment:
-      # point at the external Spark FHIR server
       FHIR_SERVER_URL: http://10.201.205.101:8007/
       MCP_PORT: 8888
-      PYTHONUNBUFFERED: 1  # Force Python to flush output immediately
+      PYTHONUNBUFFERED: 1
     networks:
       - emr-network
 
-  # Python Backend API
+  # Python Backend API (Production)
   backend-api:
-    build: ./backend-api-python
+    build:
+      context: ./backend-api-python
+      dockerfile: Dockerfile
     container_name: emr-backend-api
     ports:
       - "8004:8004"
     env_file:
       - .env
     environment:
-      # point at the HTTP MCP server service
       MCP_SERVER_URL: http://mcp-server:8888
       FHIR_SERVER_URL: http://10.201.205.101:8007/
-      CORS_ORIGIN:    http://localhost:3004
-      PYTHONUNBUFFERED: 1  # Force Python to flush output immediately
+      CORS_ORIGIN: http://localhost:3004
+      REDIS_URL: redis://redis:6379
+      WORKERS: 4
+      LOG_LEVEL: INFO
+      PYTHONUNBUFFERED: 1
     depends_on:
       - mcp-server
+      - redis
     networks:
       - emr-network
+    # Health check
+    # Health check (curl not available in slim image)
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
 
   # React Frontend
   frontend:
@@ -46,12 +67,14 @@ services:
     env_file:
       - .env
     environment:
-      # Use relative URL for API calls through nginx proxy
-      VITE_API_URL: "http://localhost:8004"
+      VITE_API_URL: "http://backend-api:8004"
     depends_on:
       - backend-api
     networks:
       - emr-network
+
+volumes:
+  redis_data:
 
 networks:
   emr-network:
