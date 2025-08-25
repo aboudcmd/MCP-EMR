@@ -21,7 +21,7 @@ services:
     env_file:
       - .env
     environment:
-      FHIR_SERVER_URL: http://10.50.108.104:8007/
+      FHIR_SERVER_URL: http://10.201.205.101:8007/
       MCP_PORT: 8888
       PYTHONUNBUFFERED: 1
     networks:
@@ -39,8 +39,8 @@ services:
       - .env
     environment:
       MCP_SERVER_URL: http://mcp-server:8888
-      FHIR_SERVER_URL: http://10.50.108.104:8007/
-      CORS_ORIGIN: http://10.7.1.9:3004
+      FHIR_SERVER_URL: http://10.201.205.101:8007/
+      CORS_ORIGIN: http://localhost:3004
       REDIS_URL: redis://redis:6379
       WORKERS: 4
       LOG_LEVEL: INFO

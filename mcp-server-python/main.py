@@ -28,7 +28,7 @@ app = FastAPI(title="EMR MCP Server", version="1.0.0")
 
 # Initialize FHIR client
 fhir_client = FHIRClient(
-    base_url=os.getenv("FHIR_SERVER_URL", "http://10.50.108.104:8007/"),
+    base_url=os.getenv("FHIR_SERVER_URL", "http://10.201.205.101:8007/"),
     auth_token=os.getenv("FHIR_AUTH_TOKEN"),
     username=os.getenv("FHIR_USERNAME"),
     password=os.getenv("FHIR_PASSWORD")

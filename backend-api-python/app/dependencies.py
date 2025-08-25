@@ -7,6 +7,7 @@ from functools import lru_cache
 from app.config import settings
 from app.services.session_service import SessionService, InMemorySessionStore
 from app.services.chat_service import ChatService
+from app.services.langchain_chat_service import LangChainChatService
 from groq_client import GroqClient
 from http_mcp_client import HTTPMCPClient
 
@@ -48,15 +49,22 @@ def get_session_service() -> SessionService:
     return _session_service
 
 @lru_cache()
-def get_chat_service() -> ChatService:
-    """Get chat service instance"""
+def get_chat_service():
+    """Get chat service instance (LangChain or original based on config)"""
     global _chat_service
     if _chat_service is None:
-        groq_client = get_groq_client()
         mcp_client = get_mcp_client()
         session_service = get_session_service()
-        _chat_service = ChatService(groq_client, mcp_client, session_service)
-        logger.info("Chat service initialized")
+        
+        if settings.USE_LANGCHAIN:
+            # Use LangChain implementation for better tool enforcement
+            _chat_service = LangChainChatService(mcp_client, session_service)
+            logger.info("LangChain chat service initialized with strict tool enforcement")
+        else:
+            # Use original implementation
+            groq_client = get_groq_client()
+            _chat_service = ChatService(groq_client, mcp_client, session_service)
+            logger.info("Original chat service initialized")
     return _chat_service
 
 async def startup_dependencies():

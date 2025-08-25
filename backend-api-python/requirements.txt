@@ -2,10 +2,15 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-dotenv==1.0.0
-groq==0.4.1
+groq>=0.30.0
 httpx==0.25.2
-pydantic==2.5.2
-pydantic-settings==2.1.0
+pydantic==2.7.4
+pydantic-settings==2.7.0
+
+# LangChain dependencies
+langchain
+langchain-groq
+langchain-community
 
 # Production dependencies
 redis==5.0.1  # For production session storage
