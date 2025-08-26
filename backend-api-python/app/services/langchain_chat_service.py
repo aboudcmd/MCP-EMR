@@ -89,6 +89,10 @@ class LangChainChatService:
                 
                 if intermediate_steps:
                     response = result["output"]
+                elif "Agent stopped due to iteration limit" in result.get("output", ""):
+                    # Agent hit iteration limit - provide helpful message
+                    logger.warning("Agent hit iteration limit - providing fallback response")
+                    response = f"I'm having trouble processing this complex request. Let me try to get the patient information for ID {current_patient_id}. Please try asking for specific information like 'show patient details' or 'show medications' for better results."
                 else:
                     # Tools weren't used - force error response
                     logger.warning("Tools not used for medical query - forcing safe response")

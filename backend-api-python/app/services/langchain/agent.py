@@ -22,50 +22,44 @@ class EMRAgentFactory:
     
     def _get_system_prompt(self) -> str:
         """Get the system prompt for the EMR agent"""
-        return """You are an EMR (Electronic Medical Records) assistant with STRICT rules:
+        return """You are an EMR assistant. For medical information, you MUST use the available tools. Never make up medical data.
 
-CRITICAL SAFETY REQUIREMENTS:
-1. You MUST use tools for ALL medical information - NO EXCEPTIONS
-2. NEVER make up patient data, even if it seems reasonable
-3. If a tool returns empty/error, say "No data found" - do not improvise
-4. Every medical fact must come from a tool response
+IMPORTANT: You must follow this EXACT format:
 
-QUERY HANDLING PROTOCOL:
-- Patient info query → MUST use get_patient_details tool
-- Conditions/diagnoses → MUST use get_patient_conditions tool  
-- Medications → MUST use get_patient_medications tool
-- Vital signs/labs → MUST use get_patient_observations tool
-- Allergies → MUST use get_patient_allergies tool
-- Patient search → MUST use search_patients tool
+Question: the input question
+Thought: what I need to do
+Action: tool_name
+Action Input: tool_input
+Observation: tool_result
+Thought: what I learned
+Final Answer: my response
 
-RESPONSE RULES:
-- Tool returns data → Report ONLY what was returned
-- Tool returns empty → Say "No [type] records found for this patient"
-- Tool fails → Say "Unable to retrieve [type] data at this time"
-- No patient ID → Say "Please provide a patient ID first"
+TOOLS AVAILABLE: {tool_names}
 
-ABSOLUTELY FORBIDDEN:
-- Inventing patient names, IDs, or demographics
-- Creating plausible-sounding medical data
-- Filling gaps with generic medical information
-- Assuming allergies, conditions, or medications
+For complete medical history queries, use MULTIPLE tools:
+1. get_patient_details (for demographics)  
+2. get_patient_conditions (for diagnoses)
+3. get_patient_medications (for prescriptions)
+4. get_patient_observations (for vitals/labs)
+5. get_patient_allergies (for allergies)
 
-You have access to the following tools:
+EXAMPLE:
 
-{tools}
-
-Use the following format:
-
-Question: the input question you must answer
-Thought: you should always think about what to do
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: the final answer to the original input question
-
-Begin!
+Question: Show me complete medical history for patient 123
+Thought: I need to get comprehensive medical information for patient 123
+Action: get_patient_details
+Action Input: 123
+Observation: {{patient details}}
+Thought: Now I need conditions
+Action: get_patient_conditions  
+Action Input: 123
+Observation: {{conditions}}
+Thought: Now I need medications
+Action: get_patient_medications
+Action Input: 123
+Observation: {{medications}}
+Thought: I have enough information
+Final Answer: Based on the EMR data: {{summary}}
 
 Question: {input}
 Thought:{agent_scratchpad}"""
@@ -86,14 +80,15 @@ Thought:{agent_scratchpad}"""
             prompt=prompt,
         )
         
-        # Create executor with strict settings
+        # Create executor with better error handling
         executor = AgentExecutor(
             agent=agent,
             tools=self.tools,
             verbose=True,  # For debugging
             return_intermediate_steps=True,
-            max_iterations=10,  # Allow more iterations for complex reasoning
-            handle_parsing_errors=True,
+            max_iterations=6,  # Reduce iterations to avoid infinite loops
+            handle_parsing_errors="Check your output and make sure it conforms to the format instructions!",
+            max_execution_time=60,  # Add timeout
         )
         
         return executor
