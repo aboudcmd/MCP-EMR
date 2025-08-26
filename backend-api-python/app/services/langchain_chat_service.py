@@ -11,10 +11,10 @@ from app.config import settings
 from app.services.session_service import SessionService
 from app.services.langchain import (
     QueryClassificationService, 
-    EMRToolsFactory, 
     EMRAgentFactory,
     MedicalQueryClassifier
 )
+from app.services.langchain.tools_async import create_async_emr_tools
 from http_mcp_client import HTTPMCPClient
 
 logger = logging.getLogger(__name__)
@@ -35,10 +35,11 @@ class LangChainChatService:
         
         # Initialize modular components
         self.query_classifier = QueryClassificationService(self.llm)
-        tools_factory = EMRToolsFactory(mcp_client)
-        tools = tools_factory.create_tools()
         
-        # Create agent executor
+        # Create async tools
+        tools = create_async_emr_tools(mcp_client)
+        
+        # Create agent executor with async tools
         agent_factory = EMRAgentFactory(self.llm, tools)
         self.agent_executor = agent_factory.create_agent_executor()
         self.tools = tools  # Store for agent invocation
@@ -76,11 +77,9 @@ class LangChainChatService:
         elif classification.requires_tools:
             # Force tool usage for medical queries
             try:
-                # Run agent with tool enforcement
+                # Run agent with function calling
                 result = await self.agent_executor.ainvoke({
-                    "input": full_message,
-                    "tools": self.tools,
-                    "tool_names": [tool.name for tool in self.tools]
+                    "input": full_message
                 })
                 
                 # Check if tools were actually used

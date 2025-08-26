@@ -4,8 +4,8 @@ LangChain agent module for EMR system
 import logging
 from typing import List
 
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain.prompts import PromptTemplate
+from langchain.agents import AgentExecutor, create_openai_tools_agent
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.tools import Tool
 from langchain_groq import ChatGroq
 
@@ -18,77 +18,56 @@ class EMRAgentFactory:
     def __init__(self, llm: ChatGroq, tools: List[Tool]):
         self.llm = llm
         self.tools = tools
-        self.system_prompt = self._get_system_prompt()
     
     def _get_system_prompt(self) -> str:
         """Get the system prompt for the EMR agent"""
-        return """You are an EMR assistant. For medical information, you MUST use the available tools. Never make up medical data.
+        return """You are an EMR (Electronic Medical Records) assistant with strict safety requirements:
 
-IMPORTANT: You must follow this EXACT format:
+CRITICAL RULES:
+- You MUST use the provided tools for ALL medical information
+- NEVER invent or guess patient data
+- If tools return no data, clearly state "No data found"
+- Always base responses on actual tool results
 
-Question: the input question
-Thought: what I need to do
-Action: tool_name
-Action Input: tool_input
-Observation: tool_result
-Thought: what I learned
-Final Answer: my response
+TOOL USAGE STRATEGY:
+- For comprehensive medical history: Use multiple tools (patient details, conditions, medications, observations, allergies)
+- For specific queries: Use the most relevant tool
+- Always call tools with just the patient ID (no extra text)
 
-TOOLS AVAILABLE: {tool_names}
+RESPONSE FORMAT:
+- Start with what you found in the EMR system
+- Provide clear, organized information
+- Include clinical recommendations when appropriate
+- Always end with guidance for next steps
 
-For complete medical history queries, use MULTIPLE tools:
-1. get_patient_details (for demographics)  
-2. get_patient_conditions (for diagnoses)
-3. get_patient_medications (for prescriptions)
-4. get_patient_observations (for vitals/labs)
-5. get_patient_allergies (for allergies)
-
-EXAMPLE:
-
-Question: Show me complete medical history for patient 123
-Thought: I need to get comprehensive medical information for patient 123
-Action: get_patient_details
-Action Input: 123
-Observation: {{patient details}}
-Thought: Now I need conditions
-Action: get_patient_conditions  
-Action Input: 123
-Observation: {{conditions}}
-Thought: Now I need medications
-Action: get_patient_medications
-Action Input: 123
-Observation: {{medications}}
-Thought: I have enough information
-Final Answer: Based on the EMR data: {{summary}}
-
-Question: {input}
-Thought:{agent_scratchpad}"""
+You have access to tools that can retrieve real patient data. Use them wisely and systematically."""
     
     def create_agent_executor(self) -> AgentExecutor:
-        """Create LangChain agent executor with strict tool enforcement"""
+        """Create LangChain agent executor with function calling"""
         
-        # Create custom ReAct prompt template
-        prompt = PromptTemplate(
-            input_variables=["input", "agent_scratchpad", "tools", "tool_names"],
-            template=self.system_prompt
-        )
+        # Create function calling prompt - much more robust
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", self._get_system_prompt()),
+            ("human", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ])
         
-        # Create ReAct agent using the correct method for non-OpenAI models
-        agent = create_react_agent(
+        # Create OpenAI tools agent - handles function calling automatically
+        agent = create_openai_tools_agent(
             llm=self.llm,
             tools=self.tools,
             prompt=prompt,
         )
         
-        # Create executor with better error handling
+        # Create executor with sequential tool execution
         executor = AgentExecutor(
             agent=agent,
             tools=self.tools,
             verbose=True,  # For debugging
             return_intermediate_steps=True,
-            max_iterations=6,  # Reduce iterations to avoid infinite loops
-            handle_parsing_errors="Check your output and make sure it conforms to the format instructions!",
-            max_execution_time=60,  # Add timeout
+            max_iterations=8,  # Allow reasonable number of tool calls
+            max_execution_time=90,  # Longer timeout for complex queries
+            max_concurrency=1,  # Force sequential tool execution - prevents connection issues
         )
         
         return executor

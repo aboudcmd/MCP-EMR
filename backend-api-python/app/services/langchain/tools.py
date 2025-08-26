@@ -5,8 +5,12 @@ import json
 import logging
 import asyncio
 from typing import List
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 from langchain.tools import Tool
+from langchain.agents import tool
+from langchain_core.tools import StructuredTool
 from http_mcp_client import HTTPMCPClient
 
 logger = logging.getLogger(__name__)
@@ -17,6 +21,23 @@ class EMRToolsFactory:
     
     def __init__(self, mcp_client: HTTPMCPClient):
         self.mcp_client = mcp_client
+    
+    def _run_async_safely(self, coro):
+        """Safely run async coroutine from sync context"""
+        try:
+            # Try to get the current event loop
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop, safe to use asyncio.run
+            return asyncio.run(coro)
+        
+        # There is a running loop, we need to run in a separate thread
+        def run_in_thread():
+            return asyncio.run(coro)
+        
+        with ThreadPoolExecutor() as executor:
+            future = executor.submit(run_in_thread)
+            return future.result(timeout=60)  # 60 second timeout
     
     def create_tools(self) -> List[Tool]:
         """Create all EMR tools for LangChain agent"""
@@ -71,6 +92,7 @@ class EMRToolsFactory:
         def search_patients_wrapper(query: str) -> str:
             """Search for patients - REQUIRED for finding patients"""
             try:
+                logger.info(f"🔧 Tool wrapper: search_patients called with {query}")
                 # Parse query to extract search parameters
                 params = {}
                 if "name:" in query:
@@ -78,7 +100,9 @@ class EMRToolsFactory:
                 if "id:" in query:
                     params["mrn"] = query.split("id:")[1].split(",")[0].strip()
                     
-                result = asyncio.run(self.mcp_client.execute_tool("search_patients", params))
+                result = self._run_async_safely(self.mcp_client.execute_tool("search_patients", params))
+                    
+                logger.info(f"🔧 Tool wrapper: search_patients completed successfully")
                 return json.dumps(result) if result else "No patients found"
             except Exception as e:
                 logger.error(f"Tool error: {e}")
@@ -91,7 +115,9 @@ class EMRToolsFactory:
         def get_patient_details_wrapper(patient_id: str) -> str:
             """Get patient demographics - REQUIRED for patient info queries"""
             try:
-                result = asyncio.run(self.mcp_client.execute_tool("get_patient_details", {"patientId": patient_id.strip()}))
+                logger.info(f"🔧 Tool wrapper: get_patient_details called with {patient_id}")
+                result = self._run_async_safely(self.mcp_client.execute_tool("get_patient_details", {"patientId": patient_id.strip()}))
+                logger.info(f"🔧 Tool wrapper: get_patient_details completed successfully")
                 return json.dumps(result) if result else "No patient details found"
             except Exception as e:
                 logger.error(f"Tool error: {e}")
@@ -104,7 +130,9 @@ class EMRToolsFactory:
         def get_conditions_wrapper(patient_id: str) -> str:
             """Get patient conditions - REQUIRED for diagnosis queries"""
             try:
-                result = asyncio.run(self.mcp_client.execute_tool("get_patient_conditions", {"patientId": patient_id.strip()}))
+                logger.info(f"🔧 Tool wrapper: get_patient_conditions called with {patient_id}")
+                result = self._run_async_safely(self.mcp_client.execute_tool("get_patient_conditions", {"patientId": patient_id.strip()}))
+                logger.info(f"🔧 Tool wrapper: get_patient_conditions completed successfully")
                 return json.dumps(result) if result else "No conditions found"
             except Exception as e:
                 logger.error(f"Tool error: {e}")
@@ -117,7 +145,9 @@ class EMRToolsFactory:
         def get_medications_wrapper(patient_id: str) -> str:
             """Get patient medications - REQUIRED for medication queries"""
             try:
-                result = asyncio.run(self.mcp_client.execute_tool("get_patient_medications", {"patientId": patient_id.strip()}))
+                logger.info(f"🔧 Tool wrapper: get_patient_medications called with {patient_id}")
+                result = self._run_async_safely(self.mcp_client.execute_tool("get_patient_medications", {"patientId": patient_id.strip()}))
+                logger.info(f"🔧 Tool wrapper: get_patient_medications completed successfully")
                 return json.dumps(result) if result else "No medications found"
             except Exception as e:
                 logger.error(f"Tool error: {e}")
@@ -130,7 +160,9 @@ class EMRToolsFactory:
         def get_observations_wrapper(patient_id: str) -> str:
             """Get patient observations - REQUIRED for vitals/lab queries"""
             try:
-                result = asyncio.run(self.mcp_client.execute_tool("get_patient_observations", {"patientId": patient_id.strip()}))
+                logger.info(f"🔧 Tool wrapper: get_patient_observations called with {patient_id}")
+                result = self._run_async_safely(self.mcp_client.execute_tool("get_patient_observations", {"patientId": patient_id.strip()}))
+                logger.info(f"🔧 Tool wrapper: get_patient_observations completed successfully")
                 return json.dumps(result) if result else "No observations found"
             except Exception as e:
                 logger.error(f"Tool error: {e}")
@@ -143,7 +175,9 @@ class EMRToolsFactory:
         def get_allergies_wrapper(patient_id: str) -> str:
             """Get patient allergies - REQUIRED for allergy queries"""
             try:
-                result = asyncio.run(self.mcp_client.execute_tool("get_patient_allergies", {"patientId": patient_id.strip()}))
+                logger.info(f"🔧 Tool wrapper: get_patient_allergies called with {patient_id}")
+                result = self._run_async_safely(self.mcp_client.execute_tool("get_patient_allergies", {"patientId": patient_id.strip()}))
+                logger.info(f"🔧 Tool wrapper: get_patient_allergies completed successfully")
                 return json.dumps(result) if result else "No allergies found"
             except Exception as e:
                 logger.error(f"Tool error: {e}")
