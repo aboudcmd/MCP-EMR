@@ -2,7 +2,6 @@
 Session management service
 Handles patient-scoped conversation sessions
 """
-import uuid
 from datetime import datetime
 from typing import Optional, Dict, Tuple
 from abc import ABC, abstractmethod

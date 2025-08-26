@@ -6,7 +6,7 @@ from typing import List
 
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.tools import Tool
+from langchain_core.tools import BaseTool
 from langchain_groq import ChatGroq
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class EMRAgentFactory:
     """Factory for creating EMR-specific LangChain agents"""
     
-    def __init__(self, llm: ChatGroq, tools: List[Tool]):
+    def __init__(self, llm: ChatGroq, tools: List[BaseTool]):
         self.llm = llm
         self.tools = tools
     

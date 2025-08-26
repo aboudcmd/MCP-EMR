@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
 
 from app.models import ChatRequest, ChatResponse, SessionClearResponse, HealthResponse
-from app.services.chat_service import ChatService
+from app.services.langchain_chat_service import LangChainChatService
 from app.services.session_service import SessionService
 from app.dependencies import get_chat_service, get_session_service
 from app.config import settings
@@ -27,7 +27,7 @@ async def health_check():
 @router.post("/api/chat", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
-    chat_service: ChatService = Depends(get_chat_service)
+    chat_service: LangChainChatService = Depends(get_chat_service)
 ):
     """Handle chat requests with patient-scoped sessions"""
     try:

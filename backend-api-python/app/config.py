@@ -2,7 +2,6 @@
 Configuration management for EMR Backend API
 Reads from .env file in project root
 """
-import os
 from pathlib import Path
 from typing import Optional, List
 from pydantic_settings import BaseSettings
@@ -42,7 +41,6 @@ class Settings(BaseSettings):
     MAX_CONVERSATION_HISTORY: int = 10
     
     # LangChain Settings
-    USE_LANGCHAIN: bool = True  # Use LangChain for better tool enforcement
     LANGCHAIN_MODEL: str = "moonshotai/kimi-k2-instruct"
     
     # Redis for production session storage (optional)

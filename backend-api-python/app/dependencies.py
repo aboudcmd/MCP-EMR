@@ -6,27 +6,15 @@ from functools import lru_cache
 
 from app.config import settings
 from app.services.session_service import SessionService, InMemorySessionStore
-from app.services.chat_service import ChatService
 from app.services.langchain_chat_service import LangChainChatService
-from groq_client import GroqClient
 from http_mcp_client import HTTPMCPClient
 
 logger = logging.getLogger(__name__)
 
 # Global instances (singletons)
-_groq_client = None
 _mcp_client = None
 _session_service = None
 _chat_service = None
-
-@lru_cache()
-def get_groq_client() -> GroqClient:
-    """Get Groq client instance"""
-    global _groq_client
-    if _groq_client is None:
-        _groq_client = GroqClient(settings.GROQ_API_KEY)
-        logger.info("Groq client initialized")
-    return _groq_client
 
 @lru_cache()
 def get_mcp_client() -> HTTPMCPClient:
@@ -49,22 +37,14 @@ def get_session_service() -> SessionService:
     return _session_service
 
 @lru_cache()
-def get_chat_service():
-    """Get chat service instance (LangChain or original based on config)"""
+def get_chat_service() -> LangChainChatService:
+    """Get LangChain chat service instance"""
     global _chat_service
     if _chat_service is None:
         mcp_client = get_mcp_client()
         session_service = get_session_service()
-        
-        if settings.USE_LANGCHAIN:
-            # Use LangChain implementation for better tool enforcement
-            _chat_service = LangChainChatService(mcp_client, session_service)
-            logger.info("LangChain chat service initialized with strict tool enforcement")
-        else:
-            # Use original implementation
-            groq_client = get_groq_client()
-            _chat_service = ChatService(groq_client, mcp_client, session_service)
-            logger.info("Original chat service initialized")
+        _chat_service = LangChainChatService(mcp_client, session_service)
+        logger.info("LangChain chat service initialized with strict tool enforcement")
     return _chat_service
 
 async def startup_dependencies():

@@ -11,8 +11,7 @@ from app.config import settings
 from app.services.session_service import SessionService
 from app.services.langchain import (
     QueryClassificationService, 
-    EMRAgentFactory,
-    MedicalQueryClassifier
+    EMRAgentFactory
 )
 from app.services.langchain.tools_async import create_async_emr_tools
 from http_mcp_client import HTTPMCPClient

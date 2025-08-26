@@ -4,7 +4,7 @@ Async-compatible LangChain tools for EMR system
 import json
 import logging
 import asyncio
-from typing import List, Optional, Any, Type
+from typing import Optional, Type, List
 from pydantic import BaseModel, Field
 
 from langchain_core.tools import BaseTool
