@@ -103,7 +103,7 @@ async def latest_vitals(patient_id: str):
 
     try:
         async with httpx.AsyncClient(timeout=15, auth=(FHIR_USER, FHIR_PASS)) as client:
-            r = await client.get(f"{FHIR_BASE}Observation",
+            r = await client.get(f"{FHIR_BASE}fhir/Observation",
                                  params=params,
                                  headers={"Accept":"application/fhir+json"})
     except httpx.RequestError as e:
@@ -174,7 +174,7 @@ async def get_all_patients():
 
     try:
         async with httpx.AsyncClient(timeout=15, auth=(FHIR_USER, FHIR_PASS)) as client:
-            r = await client.get(f"{FHIR_BASE}Patient",
+            r = await client.get(f"{FHIR_BASE}fhir/Patient",
                                  params=params,
                                  headers={"Accept":"application/fhir+json"})
     except httpx.RequestError as e:
@@ -199,7 +199,7 @@ async def get_patient_demographics(patient_id: str):
 
     try:
         async with httpx.AsyncClient(timeout=15, auth=(FHIR_USER, FHIR_PASS)) as client:
-            r = await client.get(f"{FHIR_BASE}Patient/{patient_id}",
+            r = await client.get(f"{FHIR_BASE}fhir/Patient/{patient_id}",
                                  headers={"Accept":"application/fhir+json"})
     except httpx.RequestError as e:
         raise HTTPException(502, f"FHIR unreachable: {e}") from e
