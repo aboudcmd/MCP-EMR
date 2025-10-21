@@ -125,10 +125,42 @@ async def execute_tool(tool_name: str, args: dict):
         logger.info(f"✅ MCP: Tool {tool_name} internal execution complete")
         logger.info(f"MCP: Returning result of type {type(result)}")
         return result
-        
+
+    except ValueError as e:
+        # Invalid parameters or request
+        logger.error(f"Invalid parameters for {tool_name}: {e}")
+        raise Exception(f"Invalid request: {str(e)}")
+
+    except PermissionError as e:
+        # Authentication/authorization errors
+        logger.error(f"Permission denied for {tool_name}: {e}")
+        raise Exception(f"Access denied: {str(e)}")
+
+    except FileNotFoundError as e:
+        # Resource not found (404)
+        logger.error(f"Resource not found for {tool_name}: {e}")
+        patient_id = args.get("patientId", "unknown")
+        raise Exception(f"Patient or resource not found (ID: {patient_id}). Please verify the patient ID is correct.")
+
+    except TimeoutError as e:
+        # Timeout errors
+        logger.error(f"Timeout for {tool_name}: {e}")
+        raise Exception("The request timed out. Please try again.")
+
+    except ConnectionError as e:
+        # Connection errors
+        logger.error(f"Connection error for {tool_name}: {e}")
+        raise Exception("Cannot connect to the medical records system. Please contact your administrator.")
+
+    except RuntimeError as e:
+        # Server errors
+        logger.error(f"Server error for {tool_name}: {e}")
+        raise Exception(f"Medical records system error: {str(e)}")
+
     except Exception as e:
-        logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
-        raise Exception(f"Tool execution failed: {str(e)}")
+        # Catch-all for unexpected errors
+        logger.error(f"Unexpected error executing tool {tool_name}: {e}", exc_info=True)
+        raise Exception(f"An unexpected error occurred. Please try again or contact support if the issue persists.")
 
 if __name__ == "__main__":
     import uvicorn

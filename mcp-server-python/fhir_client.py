@@ -41,38 +41,83 @@ class FHIRClient:
             logger.info(f"Using basic authentication for user: {username}")
     
     async def _make_request(self, method: str, path: str, params: Optional[Dict] = None, form_data: Optional[Dict] = None):
-        """Make HTTP request to FHIR server"""
+        """Make HTTP request to FHIR server with enhanced error handling"""
         async with httpx.AsyncClient() as client:
             # Ensure path starts with /fhir for Spark FHIR server
             if not path.startswith('/fhir'):
                 path = f"/fhir{path}"
             url = f"{self.base_url.rstrip('/')}{path}"
-            
+
             # Prepare headers
             headers = self.headers.copy()
-            
+
             logger.info("="*40)
             logger.info(f"FHIR CLIENT: Making request to FHIR server")
             logger.info(f"Method: {method}")
             logger.info(f"URL: {url}")
-            
-            if form_data:
-                # POST request with form data
-                headers["Content-Type"] = "application/x-www-form-urlencoded"
-                logger.info(f"Form data: {form_data}")
-                response = await client.request(method, url, data=form_data, headers=headers)
-            else:
-                # GET request with query parameters
-                if params:
-                    url = f"{url}?{urlencode(params)}"
-                    logger.info(f"Query params: {params}")
-                logger.info(f"Full URL: {url}")
-                response = await client.request(method, url, headers=headers)
-            
-            logger.info(f"✅ FHIR response status: {response.status_code}")
-            
-            response.raise_for_status()
-            result = response.json()
+
+            try:
+                if form_data:
+                    # POST request with form data
+                    headers["Content-Type"] = "application/x-www-form-urlencoded"
+                    logger.info(f"Form data: {form_data}")
+                    response = await client.request(method, url, data=form_data, headers=headers)
+                else:
+                    # GET request with query parameters
+                    if params:
+                        url = f"{url}?{urlencode(params)}"
+                        logger.info(f"Query params: {params}")
+                    logger.info(f"Full URL: {url}")
+                    response = await client.request(method, url, headers=headers)
+
+                logger.info(f"✅ FHIR response status: {response.status_code}")
+
+                response.raise_for_status()
+                result = response.json()
+
+            except httpx.HTTPStatusError as e:
+                # Enhanced error handling for HTTP errors
+                status_code = e.response.status_code
+                logger.error(f"FHIR server error: {status_code} - {e.response.text[:200]}")
+
+                # Parse error details from FHIR OperationOutcome if available
+                error_detail = "Unknown error"
+                try:
+                    error_response = e.response.json()
+                    if error_response.get("resourceType") == "OperationOutcome":
+                        issues = error_response.get("issue", [])
+                        if issues:
+                            error_detail = issues[0].get("diagnostics", issues[0].get("details", {}).get("text", error_detail))
+                except:
+                    error_detail = e.response.text[:200] if e.response.text else str(e)
+
+                # User-friendly error messages based on status code
+                if status_code == 400:
+                    raise ValueError(f"Invalid request parameters. {error_detail}")
+                elif status_code == 401:
+                    raise PermissionError("Authentication failed. Please check credentials.")
+                elif status_code == 403:
+                    raise PermissionError("Access denied. You don't have permission to access this resource.")
+                elif status_code == 404:
+                    raise FileNotFoundError(f"Resource not found: {path}")
+                elif status_code == 500:
+                    raise RuntimeError("FHIR server error. Please try again or contact support.")
+                elif status_code == 503:
+                    raise RuntimeError("FHIR server is temporarily unavailable. Please try again later.")
+                else:
+                    raise RuntimeError(f"FHIR server error ({status_code}): {error_detail}")
+
+            except httpx.TimeoutException:
+                logger.error(f"FHIR request timeout for {url}")
+                raise TimeoutError("Request timed out. The FHIR server is taking too long to respond.")
+
+            except httpx.ConnectError as e:
+                logger.error(f"Cannot connect to FHIR server: {e}")
+                raise ConnectionError("Cannot connect to FHIR server. Please check if the server is running.")
+
+            except Exception as e:
+                logger.error(f"Unexpected error in FHIR request: {e}", exc_info=True)
+                raise RuntimeError(f"Unexpected error communicating with FHIR server: {str(e)}")
             
             # Log result summary
             if isinstance(result, dict):

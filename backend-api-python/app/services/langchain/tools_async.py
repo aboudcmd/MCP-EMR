@@ -196,7 +196,29 @@ class GetPatientObservationsTool(AsyncEMRTool):
                 return json.dumps(result) if result else "No observations found"
             except Exception as e:
                 logger.error(f"Tool error: {e}", exc_info=True)
-                return f"Error retrieving observations: {str(e)}"
+
+                # Build user-friendly error message with context
+                error_context = []
+                if category:
+                    category_names = {
+                        "laboratory": "laboratory results",
+                        "vital-signs": "vital signs",
+                        "imaging": "imaging/radiology reports"
+                    }
+                    error_context.append(category_names.get(category, category))
+                else:
+                    error_context.append("observations")
+
+                if date_from or date_to:
+                    if date_from and date_to:
+                        error_context.append(f"from {date_from} to {date_to}")
+                    elif date_from:
+                        error_context.append(f"from {date_from} onwards")
+                    elif date_to:
+                        error_context.append(f"up to {date_to}")
+
+                context_str = " ".join(error_context)
+                return f"Unable to retrieve {context_str} for patient {patient_id}. {str(e)}"
 
 
 class GetPatientAllergiesTool(AsyncEMRTool):

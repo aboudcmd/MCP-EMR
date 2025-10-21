@@ -2,12 +2,15 @@
 Session management service
 Handles patient-scoped conversation sessions
 """
+import logging
 from datetime import datetime
 from typing import Optional, Dict, Tuple
 from abc import ABC, abstractmethod
 
 from app.models import SessionData
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 class SessionStore(ABC):
     """Abstract base class for session storage"""
@@ -57,19 +60,23 @@ class SessionService:
     
     async def get_patient_session(self, patient_id: Optional[str]) -> Tuple[Optional[str], SessionData]:
         """Get or create session for specific patient"""
+        logger.info(f"📋 Getting session for patient_id: {patient_id}")
+
         if not patient_id:
             # Return empty session for general queries without patient context
+            logger.info("📋 No patient_id provided, returning empty session")
             return None, SessionData(
                 history=[],
                 patient_id=None,
                 created_at=datetime.utcnow().isoformat(),
                 last_accessed=datetime.utcnow().isoformat()
             )
-        
+
         session_key = f"patient_{patient_id}"
         session_data = await self.session_store.get_session(session_key)
-        
+
         if not session_data:
+            logger.info(f"📋 Creating NEW session for patient {patient_id}")
             session_data = SessionData(
                 history=[],
                 patient_id=patient_id,
@@ -78,22 +85,24 @@ class SessionService:
             )
             await self.session_store.set_session(session_key, session_data)
         else:
+            logger.info(f"📋 Found EXISTING session for patient {patient_id} with {len(session_data.history)} messages")
             # Update last accessed time
             session_data.last_accessed = datetime.utcnow().isoformat()
             await self.session_store.set_session(session_key, session_data)
-        
+
         return patient_id, session_data
     
     async def add_to_history(self, patient_id: str, user_message: str, assistant_response: str):
         """Add conversation to patient session history"""
         session_key = f"patient_{patient_id}"
         session_data = await self.session_store.get_session(session_key)
-        
+
         if session_data:
             session_data.history.extend([
                 {"role": "user", "content": user_message},
                 {"role": "assistant", "content": assistant_response}
             ])
+            logger.info(f"📝 Added to history for patient {patient_id}. Total messages now: {len(session_data.history)}")
             
             # Keep session size manageable
             if len(session_data.history) > settings.MAX_CONVERSATION_HISTORY:

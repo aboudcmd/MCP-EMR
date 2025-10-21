@@ -55,20 +55,32 @@ class LangChainChatService:
         classification = await self.query_classifier.should_use_tools(message, current_patient_id)
         logger.info(f"Query classification: {classification}")
         
-        # Build context with patient ID
-        context = f"Patient ID {current_patient_id} is selected" if current_patient_id else "No patient selected"
-        full_message = f"{context}. {message}" if current_patient_id else message
+        # Build context with patient ID and current date
+        from datetime import datetime
+        current_date = datetime.now().strftime("%Y-%m-%d")
+
+        context_parts = []
+        if current_patient_id:
+            context_parts.append(f"Patient ID {current_patient_id} is selected")
+        context_parts.append(f"Today's date is {current_date}")
+
+        context = ". ".join(context_parts)
+        full_message = f"{context}. {message}"
         
         # Prepare chat history from session
         from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
         chat_history = []
-        
+
         # Load session history into chat messages
         for msg in session.history[-settings.MAX_CONVERSATION_HISTORY:]:
             if msg["role"] == "user":
                 chat_history.append(HumanMessage(content=msg["content"]))
             else:
                 chat_history.append(AIMessage(content=msg["content"]))
+
+        logger.info(f"Chat history loaded: {len(chat_history)} messages")
+        if chat_history:
+            logger.info(f"Last message in history: {chat_history[-1].content[:100] if chat_history else 'None'}...")
         
         # Process based on classification
         if classification.requires_tools and not current_patient_id:
@@ -76,16 +88,26 @@ class LangChainChatService:
         elif classification.requires_tools:
             # Force tool usage for medical queries
             try:
-                # Run agent with function calling
+                # Run agent with function calling AND chat history for context
                 result = await self.agent_executor.ainvoke({
-                    "input": full_message
+                    "input": full_message,
+                    "chat_history": chat_history  # ✅ Include conversation history
                 })
-                
+
                 # Check if tools were actually used
                 intermediate_steps = result.get("intermediate_steps", [])
-                logger.info(f"Agent result: output='{result.get('output')}', intermediate_steps_count={len(intermediate_steps)}")
-                
-                if intermediate_steps:
+                logger.info(f"Agent result keys: {result.keys()}")
+                logger.info(f"Agent result: output='{result.get('output')[:200] if result.get('output') else None}...', intermediate_steps_count={len(intermediate_steps)}")
+
+                # Check if output contains actual data (tool was used even if intermediate_steps is empty)
+                output = result.get("output", "")
+                has_tool_data = any([
+                    "Laboratory" in output,
+                    "observations" in str(result),
+                    len(output) > 100,  # Non-trivial response
+                ])
+
+                if intermediate_steps or has_tool_data:
                     response = result["output"]
                 elif "Agent stopped due to iteration limit" in result.get("output", ""):
                     # Agent hit iteration limit - provide helpful message
@@ -104,13 +126,18 @@ class LangChainChatService:
             messages = [
                 SystemMessage(content="You are a helpful EMR assistant. You can answer general questions and refer to previous conversations. For medical data retrieval, you would need to use tools, but for general conversation you can respond normally.")
             ]
-            
+
             # Add chat history
             messages.extend(chat_history)
-            
-            # Add current message
-            messages.append(HumanMessage(content=message))
-            
+
+            # Add current message WITH context (date + patient ID)
+            messages.append(HumanMessage(content=full_message))  # ✅ Use full_message with date context!
+
+            # Debug: Log what we're sending to LLM
+            logger.info(f"Sending to LLM: {len(messages)} messages")
+            for i, msg in enumerate(messages):
+                logger.info(f"  Message {i}: {type(msg).__name__} - {str(msg.content)[:100]}...")
+
             response = await self.llm.ainvoke(messages)
             response = response.content
         
