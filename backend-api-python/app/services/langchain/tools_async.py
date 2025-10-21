@@ -23,6 +23,27 @@ class PatientIdInput(BaseModel):
     patient_id: str = Field(description="The patient ID")
 
 
+class PatientObservationsInput(BaseModel):
+    """Input for patient observations with optional filtering"""
+    patient_id: str = Field(description="The patient ID")
+    category: Optional[str] = Field(
+        default=None,
+        description="Filter by observation category: 'vital-signs' for vitals, 'laboratory' for lab tests, 'imaging' for radiology/X-rays"
+    )
+    code: Optional[str] = Field(
+        default=None,
+        description="Filter by specific observation/test code (e.g., LOINC code for specific lab test)"
+    )
+    date_from: Optional[str] = Field(
+        default=None,
+        description="Filter observations from this date (format: YYYY-MM-DD)"
+    )
+    date_to: Optional[str] = Field(
+        default=None,
+        description="Filter observations until this date (format: YYYY-MM-DD)"
+    )
+
+
 class SearchPatientInput(BaseModel):
     """Input for patient search"""
     query: str = Field(description="Search query (e.g., 'name:John Doe' or 'id:12345')")
@@ -130,24 +151,46 @@ class GetPatientObservationsTool(AsyncEMRTool):
     """Tool to get patient observations including vitals, labs, and imaging"""
     name: str = "get_patient_observations"
     description: str = """Get patient observations including:
-    - Vital signs (blood pressure, weight, temperature, heart rate, etc.)
-    - Laboratory results (blood tests, cholesterol, glucose, CBC, etc.)
-    - Radiology/Imaging reports (X-ray, CT, MRI findings and interpretations)
-    MUST USE for any queries about vitals, labs, test results, imaging, radiology, or diagnostic findings."""
-    args_schema: Type[BaseModel] = PatientIdInput
-    
+    - Vital signs (blood pressure, weight, temperature, heart rate, etc.) - use category='vital-signs'
+    - Laboratory results (blood tests, cholesterol, glucose, CBC, etc.) - use category='laboratory'
+    - Radiology/Imaging reports (X-ray, CT, MRI findings and interpretations) - use category='imaging'
+
+    IMPORTANT: Always use the 'category' parameter to filter results:
+    - For vitals: category='vital-signs'
+    - For lab results: category='laboratory'
+    - For imaging/radiology: category='imaging'
+
+    This ensures you get the specific type of results requested."""
+    args_schema: Type[BaseModel] = PatientObservationsInput
+
     async def _arun(
         self,
         patient_id: str,
+        category: Optional[str] = None,
+        code: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
     ) -> str:
         """Get patient observations asynchronously"""
         async with TOOL_EXECUTION_LOCK:
             try:
-                logger.info(f"🔧 Async tool: get_patient_observations called with {patient_id}")
+                logger.info(f"🔧 Async tool: get_patient_observations called with patient_id={patient_id}, category={category}, code={code}")
+
+                # Build arguments dict
+                args = {"patientId": patient_id.strip()}
+                if category:
+                    args["category"] = category
+                if code:
+                    args["code"] = code
+                if date_from:
+                    args["dateFrom"] = date_from
+                if date_to:
+                    args["dateTo"] = date_to
+
                 result = await self.mcp_client.execute_tool(
                     "get_patient_observations",
-                    {"patientId": patient_id.strip()}
+                    args
                 )
                 logger.info(f"🔧 Async tool: get_patient_observations completed")
                 return json.dumps(result) if result else "No observations found"

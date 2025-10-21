@@ -13,13 +13,24 @@ from types_models import (
 
 logger = logging.getLogger(__name__)
 
+# ⚙️ FHIR RESOURCE LIMITS - Control how many items are retrieved for each resource type
+# Increase these numbers if you need more results, but be aware of performance impact
+FHIR_LIMITS = {
+    "conditions": 100,      # Medical conditions/diagnoses
+    "medications": 100,     # Medications and prescriptions
+    "observations": 200,    # Vitals, labs, imaging (increased from 100)
+    "encounters": 100,      # Visits and encounters
+    "allergies": 100,       # Allergy intolerances
+    "diagnostic_reports": 100  # Diagnostic reports (if used)
+}
+
 class FHIRClient:
     def __init__(self, base_url: str, auth_token: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None):
         self.base_url = base_url
         self.headers = {
             "Content-Type": "application/fhir+json",
         }
-        
+
         # Support both Bearer token and Basic auth
         if auth_token:
             self.headers["Authorization"] = f"Bearer {auth_token}"
@@ -138,7 +149,7 @@ class FHIRClient:
         """Get patient conditions using Spark FHIR _search endpoint"""
         form_data = {
             "subject": patient_id,
-            "_count": "100"  # Request up to 100 conditions
+            "_count": str(FHIR_LIMITS["conditions"])
         }
         if clinical_status:
             form_data["clinical-status"] = clinical_status
@@ -150,7 +161,7 @@ class FHIRClient:
         """Get patient medications using Spark FHIR _search endpoint"""
         form_data = {
             "subject": patient_id,
-            "_count": "100"  # Request up to 100 medications
+            "_count": str(FHIR_LIMITS["medications"])
         }
         if status:
             form_data["status"] = status
@@ -162,7 +173,7 @@ class FHIRClient:
         """Get patient observations using Spark FHIR _search endpoint"""
         form_data = {
             "subject": f"Patient/{args.patientId}",
-            "_count": "100",  # Request up to 100 observations to avoid pagination issues
+            "_count": str(FHIR_LIMITS["observations"]),
             "_sort": "-date"  # Sort by date descending (most recent first)
         }
         if args.category:
@@ -189,7 +200,7 @@ class FHIRClient:
         """Get patient encounters/visits"""
         params = {
             "patient": args.patientId,
-            "_count": "100"  # Request up to 100 encounters
+            "_count": str(FHIR_LIMITS["encounters"])
         }
         if args.type:
             params["type"] = args.type
@@ -210,7 +221,7 @@ class FHIRClient:
         """Get patient allergies"""
         params = {
             "patient": patient_id,
-            "_count": "100"  # Request up to 100 allergies
+            "_count": str(FHIR_LIMITS["allergies"])
         }
         data = await self._make_request("GET", "/AllergyIntolerance", params)
         return self._format_allergies(data)
@@ -219,7 +230,7 @@ class FHIRClient:
         """Get patient diagnostic reports (lab results) using Spark FHIR _search endpoint"""
         form_data = {
             "subject": f"Patient/{args.patientId}",
-            "_count": "100",
+            "_count": str(FHIR_LIMITS["diagnostic_reports"]),
             "_sort": "-date"  # Sort by date descending (most recent first)
         }
         if args.category:
