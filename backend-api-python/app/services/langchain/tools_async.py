@@ -127,9 +127,13 @@ class GetPatientMedicationsTool(AsyncEMRTool):
 
 
 class GetPatientObservationsTool(AsyncEMRTool):
-    """Tool to get patient observations"""
+    """Tool to get patient observations including vitals, labs, and imaging"""
     name: str = "get_patient_observations"
-    description: str = "Get vital signs, lab results, observations. MUST USE for vitals/labs queries."
+    description: str = """Get patient observations including:
+    - Vital signs (blood pressure, weight, temperature, heart rate, etc.)
+    - Laboratory results (blood tests, cholesterol, glucose, CBC, etc.)
+    - Radiology/Imaging reports (X-ray, CT, MRI findings and interpretations)
+    MUST USE for any queries about vitals, labs, test results, imaging, radiology, or diagnostic findings."""
     args_schema: Type[BaseModel] = PatientIdInput
     
     async def _arun(
@@ -183,7 +187,7 @@ class SearchPatientsTool(AsyncEMRTool):
     name: str = "search_patients"
     description: str = "Search for patients by name or ID. Use format: 'name:John Doe' or 'id:12345'"
     args_schema: Type[BaseModel] = SearchPatientInput
-    
+
     async def _arun(
         self,
         query: str,
@@ -199,7 +203,7 @@ class SearchPatientsTool(AsyncEMRTool):
                     params["name"] = query.split("name:")[1].split(",")[0].strip()
                 if "id:" in query:
                     params["mrn"] = query.split("id:")[1].split(",")[0].strip()
-                    
+
                 result = await self.mcp_client.execute_tool("search_patients", params)
                 logger.info(f"🔧 Async tool: search_patients completed")
                 return json.dumps(result) if result else "No patients found"

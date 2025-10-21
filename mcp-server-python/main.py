@@ -10,7 +10,8 @@ from fhir_client import FHIRClient
 from types_models import (
     SearchPatientsArgs,
     GetPatientObservationsArgs,
-    GetPatientEncountersArgs
+    GetPatientEncountersArgs,
+    GetPatientDiagnosticReportsArgs
 )
 
 # Configure logging
@@ -74,48 +75,53 @@ async def execute_tool_endpoint(request: ToolRequest):
 
 async def execute_tool(tool_name: str, args: dict):
     """Execute a tool based on its name and arguments"""
-    
+
     try:
         logger.info(f"MCP: Processing {tool_name} internally...")
-        
+
         if tool_name == "search_patients":
             result = await fhir_client.search_patients(SearchPatientsArgs(**args))
-        
+
         elif tool_name == "get_patient_details":
             result = await fhir_client.get_patient_details(args["patientId"])
-        
+
         elif tool_name == "get_patient_conditions":
             result = await fhir_client.get_patient_conditions(
                 args["patientId"],
                 args.get("clinicalStatus")
             )
-        
+
         elif tool_name == "get_patient_medications":
             result = await fhir_client.get_patient_medications(
                 args["patientId"],
                 args.get("status")
             )
-        
+
         elif tool_name == "get_patient_observations":
             result = await fhir_client.get_patient_observations(
                 GetPatientObservationsArgs(**args)
             )
-        
+
         elif tool_name == "get_patient_encounters":
             result = await fhir_client.get_patient_encounters(
                 GetPatientEncountersArgs(**args)
             )
-        
+
         elif tool_name == "get_patient_allergies":
             result = await fhir_client.get_patient_allergies(args["patientId"])
-        
+
         elif tool_name == "get_patient_everything":
             resource_types = args.get("resourceTypes", ["Observation", "Condition", "MedicationRequest"])
             result = await fhir_client.get_patient_everything(args["patientId"], resource_types)
-        
+
+        elif tool_name == "get_patient_diagnostic_reports":
+            result = await fhir_client.get_patient_diagnostic_reports(
+                GetPatientDiagnosticReportsArgs(**args)
+            )
+
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
-        
+
         logger.info(f"✅ MCP: Tool {tool_name} internal execution complete")
         logger.info(f"MCP: Returning result of type {type(result)}")
         return result
@@ -127,4 +133,4 @@ async def execute_tool(tool_name: str, args: dict):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("MCP_PORT", 8888))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

@@ -7,7 +7,8 @@ from urllib.parse import urlencode
 from types_models import (
     SearchPatientsArgs,
     GetPatientObservationsArgs,
-    GetPatientEncountersArgs
+    GetPatientEncountersArgs,
+    GetPatientDiagnosticReportsArgs
 )
 
 logger = logging.getLogger(__name__)
@@ -213,6 +214,33 @@ class FHIRClient:
         }
         data = await self._make_request("GET", "/AllergyIntolerance", params)
         return self._format_allergies(data)
+
+    async def get_patient_diagnostic_reports(self, args: GetPatientDiagnosticReportsArgs):
+        """Get patient diagnostic reports (lab results) using Spark FHIR _search endpoint"""
+        form_data = {
+            "subject": f"Patient/{args.patientId}",
+            "_count": "100",
+            "_sort": "-date"  # Sort by date descending (most recent first)
+        }
+        if args.category:
+            form_data["category"] = args.category
+        if args.code:
+            form_data["code"] = args.code
+
+        # Handle date range
+        if args.dateFrom or args.dateTo:
+            date_range = []
+            if args.dateFrom:
+                date_range.append(f"ge{args.dateFrom}")
+            if args.dateTo:
+                date_range.append(f"le{args.dateTo}")
+            form_data["date"] = ",".join(date_range)
+
+        data = await self._make_request("POST", "/DiagnosticReport/_search", form_data=form_data)
+        formatted_result = self._format_diagnostic_reports(data)
+        logger.info(f"Formatted {len(formatted_result.get('diagnosticReports', []))} diagnostic reports for patient {args.patientId}")
+
+        return formatted_result
     
     # Formatting methods
     def _format_bundle(self, bundle: Dict) -> Dict:
@@ -504,32 +532,39 @@ class FHIRClient:
                 if resource["category"][0].get("coding"):
                     category = resource["category"][0]["coding"][0].get("display")
             
-            # Get value - handle both simple valueQuantity and component values
+            # Get value - handle valueQuantity, valueString, and component values
             value = None
+            value_type = None
             components = []
-            
+
             if resource.get("valueQuantity"):
-                # Simple value
+                # Simple numeric value (labs, vitals)
                 value_qty = resource["valueQuantity"]
                 value = f"{value_qty.get('value')} {value_qty.get('unit', '')}"
+                value_type = "quantity"
+            elif resource.get("valueString"):
+                # Text value (radiology reports, imaging results)
+                value = resource["valueString"]
+                value_type = "text"
             elif resource.get("component"):
                 # Component values (e.g., systolic/diastolic blood pressure)
+                value_type = "components"
                 for component in resource["component"]:
                     comp_code = None
                     comp_value = None
-                    
+
                     if component.get("code") and component["code"].get("coding"):
                         comp_code = component["code"]["coding"][0].get("display")
-                    
+
                     if component.get("valueQuantity"):
                         comp_qty = component["valueQuantity"]
                         comp_value = f"{comp_qty.get('value')} {comp_qty.get('unit', '')}"
-                    
+
                     components.append({
                         "code": comp_code,
                         "value": comp_value
                     })
-                
+
                 # Create a combined value string for components
                 if components:
                     comp_values = [f"{c['code']}: {c['value']}" for c in components if c['code'] and c['value']]
@@ -561,7 +596,9 @@ class FHIRClient:
                 "codeSystem": obs_system,
                 "type": obs_type,
                 "category": category,
+                "categoryCode": resource.get("category", [{}])[0].get("coding", [{}])[0].get("code") if resource.get("category") else None,
                 "value": value,
+                "valueType": value_type,
                 "components": components if components else None,
                 "interpretation": interpretation,
                 "referenceRange": reference_range,
@@ -580,10 +617,22 @@ class FHIRClient:
             logger.info(f"Sorted {len(observations)} observations by date (most recent first)")
         except Exception as e:
             logger.warning(f"Could not sort observations by date: {e}")
-        
+
+        # Group observations by category for better organization
+        vitals = [obs for obs in observations if obs.get('categoryCode') == 'vital-signs']
+        labs = [obs for obs in observations if obs.get('categoryCode') == 'laboratory']
+        imaging = [obs for obs in observations if obs.get('categoryCode') == 'imaging']
+        other = [obs for obs in observations if obs.get('categoryCode') not in ['vital-signs', 'laboratory', 'imaging']]
+
+        logger.info(f"Categorized observations: {len(vitals)} vitals, {len(labs)} labs, {len(imaging)} imaging, {len(other)} other")
+
         return {
             "total": bundle.get("total", len(observations)),
-            "observations": observations
+            "observations": observations,
+            "vitals": vitals,
+            "labs": labs,
+            "imaging": imaging,
+            "other": other
         }
     
     def _format_encounters(self, bundle: Dict) -> List[Dict]:
@@ -621,18 +670,18 @@ class FHIRClient:
         """Format allergies bundle"""
         total = bundle.get("total", 0)
         entries = bundle.get("entry", [])
-        
+
         logger.info(f"Allergies bundle: total={total}, has_entry={bool(entries)}, entry_count={len(entries)}")
-        
+
         if not entries:
             if total > 0:
                 logger.warning(f"FHIR returned {total} allergies but no entries - likely pagination issue")
             return []
-        
+
         allergies = []
         for entry in bundle["entry"]:
             resource = entry["resource"]
-            
+
             # Get substance
             substance = None
             if resource.get("code"):
@@ -640,7 +689,7 @@ class FHIRClient:
                     substance = resource["code"]["coding"][0].get("display")
                 elif resource["code"].get("text"):
                     substance = resource["code"]["text"]
-            
+
             allergies.append({
                 "id": resource.get("id"),
                 "substance": substance,
@@ -648,8 +697,79 @@ class FHIRClient:
                 "type": resource.get("type"),
                 "recordedDate": resource.get("recordedDate"),
             })
-        
+
         return allergies
+
+    def _format_diagnostic_reports(self, bundle: Dict) -> Dict:
+        """Format diagnostic reports bundle"""
+        total = bundle.get("total", 0)
+        entries = bundle.get("entry", [])
+
+        logger.info(f"DiagnosticReports bundle: total={total}, has_entry={bool(entries)}, entry_count={len(entries)}")
+
+        if not entries:
+            if total > 0:
+                logger.warning(f"FHIR returned {total} diagnostic reports but no entries - likely pagination issue")
+            return {"total": total, "diagnosticReports": []}
+
+        diagnostic_reports = []
+        for entry in bundle["entry"]:
+            resource = entry["resource"]
+
+            # Get diagnostic report code/type
+            code_display = None
+            code_value = None
+            code_system = None
+            if resource.get("code"):
+                if resource["code"].get("coding") and len(resource["code"]["coding"]) > 0:
+                    coding = resource["code"]["coding"][0]
+                    code_display = coding.get("display")
+                    code_value = coding.get("code")
+                    code_system = coding.get("system")
+                elif resource["code"].get("text"):
+                    code_display = resource["code"]["text"]
+
+            # Get category
+            category = None
+            if resource.get("category") and len(resource["category"]) > 0:
+                if resource["category"][0].get("coding"):
+                    category = resource["category"][0]["coding"][0].get("display")
+
+            # Get results references
+            results = []
+            if resource.get("result"):
+                for result_ref in resource["result"]:
+                    results.append(result_ref.get("reference"))
+
+            diagnostic_reports.append({
+                "id": resource.get("id"),
+                "status": resource.get("status"),
+                "category": category,
+                "code": code_display,
+                "codeValue": code_value,
+                "codeSystem": code_system,
+                "subject": resource.get("subject", {}).get("reference"),
+                "effectiveDateTime": resource.get("effectiveDateTime"),
+                "issued": resource.get("issued"),
+                "results": results,
+                "conclusion": resource.get("conclusion"),
+                "conclusionCode": resource.get("conclusionCode"),
+            })
+
+        # Sort by effectiveDateTime (most recent first)
+        try:
+            diagnostic_reports.sort(
+                key=lambda x: x.get('effectiveDateTime') or '1900-01-01',
+                reverse=True
+            )
+            logger.info(f"Sorted {len(diagnostic_reports)} diagnostic reports by date (most recent first)")
+        except Exception as e:
+            logger.warning(f"Could not sort diagnostic reports by date: {e}")
+
+        return {
+            "total": bundle.get("total", len(diagnostic_reports)),
+            "diagnosticReports": diagnostic_reports
+        }
     
     def _format_everything_response(self, bundle: Dict) -> Dict:
         """Format $everything endpoint response with all patient data"""

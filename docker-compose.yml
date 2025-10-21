@@ -18,6 +18,8 @@ services:
     container_name: emr-mcp-server
     ports:
       - "8888:8888"
+    volumes:
+      - ./mcp-server-python:/app
     env_file:
       - .env
     environment:

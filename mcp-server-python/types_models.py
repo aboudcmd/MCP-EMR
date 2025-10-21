@@ -37,3 +37,10 @@ class GetPatientEncountersArgs(BaseModel):
 
 class GetPatientAllergiesArgs(BaseModel):
     patientId: str
+
+class GetPatientDiagnosticReportsArgs(BaseModel):
+    patientId: str
+    category: Optional[str] = None
+    code: Optional[str] = None
+    dateFrom: Optional[str] = None
+    dateTo: Optional[str] = None
