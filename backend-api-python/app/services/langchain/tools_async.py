@@ -32,7 +32,7 @@ class PatientObservationsInput(BaseModel):
     )
     code: Optional[str] = Field(
         default=None,
-        description="Filter by specific observation/test code (e.g., LOINC code for specific lab test)"
+        description="Filter by EXACT observation code if you know it (e.g., 'HBA1C', 'CHOL', 'CREATININE'). IMPORTANT: Only use if you know the exact code. For general queries (e.g., 'cholesterol', 'CBC'), DO NOT use this parameter - instead use category='laboratory' and filter results yourself. Many tests have abbreviated codes (CHOL not CHOLESTEROL, HBA1C not A1C)."
     )
     date_from: Optional[str] = Field(
         default=None,

@@ -215,7 +215,7 @@ class FHIRClient:
         return self._format_medications(data)
     
     async def get_patient_observations(self, args: GetPatientObservationsArgs):
-        """Get patient observations using Spark FHIR _search endpoint"""
+        """Get patient observations using Spark FHIR _search endpoint with smart code handling"""
         form_data = {
             "subject": f"Patient/{args.patientId}",
             "_count": str(FHIR_LIMITS["observations"]),
@@ -223,9 +223,7 @@ class FHIRClient:
         }
         if args.category:
             form_data["category"] = args.category
-        if args.code:
-            form_data["code"] = args.code
-        
+
         # Handle date range
         if args.dateFrom or args.dateTo:
             date_range = []
@@ -234,11 +232,23 @@ class FHIRClient:
             if args.dateTo:
                 date_range.append(f"le{args.dateTo}")
             form_data["date"] = ",".join(date_range)
-        
-        data = await self._make_request("POST", "/Observation/_search", form_data=form_data)
+
+        # Smart code handling: Try exact match first, if no results and code provided, try without code
+        if args.code:
+            form_data["code"] = args.code
+            data = await self._make_request("POST", "/Observation/_search", form_data=form_data)
+
+            # If no results with exact code, retry without code filter (let agent filter client-side)
+            if data.get("total", 0) == 0:
+                logger.info(f"No results for code='{args.code}', retrying without code filter")
+                del form_data["code"]
+                data = await self._make_request("POST", "/Observation/_search", form_data=form_data)
+        else:
+            data = await self._make_request("POST", "/Observation/_search", form_data=form_data)
+
         formatted_result = self._format_observations(data)
         logger.info(f"Formatted {len(formatted_result.get('observations', []))} observations for patient {args.patientId}")
-        
+
         return formatted_result
     
     async def get_patient_encounters(self, args: GetPatientEncountersArgs):

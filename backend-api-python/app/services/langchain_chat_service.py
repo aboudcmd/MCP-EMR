@@ -88,10 +88,19 @@ class LangChainChatService:
         elif classification.requires_tools:
             # Force tool usage for medical queries
             try:
-                # Run agent with function calling AND chat history for context
+                # Pass ONLY user messages for context understanding
+                # This allows follow-up questions like "and the most recent one?" to work
+                # But prevents the agent from answering based on previous assistant responses
+                from langchain_core.messages import HumanMessage
+
+                recent_history = chat_history[-6:] if len(chat_history) > 6 else chat_history
+                context_history = [msg for msg in recent_history if isinstance(msg, HumanMessage)]
+
+                logger.info(f"🔧 Running agent with {len(context_history)} user messages for context")
+
                 result = await self.agent_executor.ainvoke({
                     "input": full_message,
-                    "chat_history": chat_history  # ✅ Include conversation history
+                    "chat_history": context_history  # ✅ Only user messages
                 })
 
                 # Check if tools were actually used
@@ -99,15 +108,17 @@ class LangChainChatService:
                 logger.info(f"Agent result keys: {result.keys()}")
                 logger.info(f"Agent result: output='{result.get('output')[:200] if result.get('output') else None}...', intermediate_steps_count={len(intermediate_steps)}")
 
-                # Check if output contains actual data (tool was used even if intermediate_steps is empty)
-                output = result.get("output", "")
-                has_tool_data = any([
-                    "Laboratory" in output,
-                    "observations" in str(result),
-                    len(output) > 100,  # Non-trivial response
-                ])
+                # Log detailed intermediate steps info
+                if intermediate_steps:
+                    for i, step in enumerate(intermediate_steps):
+                        logger.info(f"  Step {i}: tool={step[0].tool if hasattr(step[0], 'tool') else 'unknown'}, action={type(step[0]).__name__}")
+                else:
+                    logger.warning(f"⚠️  NO INTERMEDIATE STEPS - Agent may have used chat history instead of tools!")
 
-                if intermediate_steps or has_tool_data:
+                # STRICT CHECK: Only accept if tools were actually called
+                if intermediate_steps and len(intermediate_steps) > 0:
+                    # Tools were called - this is real data
+                    logger.info(f"✅ Tools were called: {[step[0].tool for step in intermediate_steps]}")
                     response = result["output"]
                 elif "Agent stopped due to iteration limit" in result.get("output", ""):
                     # Agent hit iteration limit - provide helpful message
