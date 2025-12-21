@@ -16,12 +16,12 @@ logger = logging.getLogger(__name__)
 # ⚙️ FHIR RESOURCE LIMITS - Control how many items are retrieved for each resource type
 # Increase these numbers if you need more results, but be aware of performance impact
 FHIR_LIMITS = {
-    "conditions": 100,      # Medical conditions/diagnoses
-    "medications": 100,     # Medications and prescriptions
-    "observations": 200,    # Vitals, labs, imaging (increased from 100)
-    "encounters": 100,      # Visits and encounters
-    "allergies": 100,       # Allergy intolerances
-    "diagnostic_reports": 100  # Diagnostic reports (if used)
+    "conditions": 10,      # Medical conditions/diagnoses
+    "medications": 10,     # Medications and prescriptions
+    "observations": 20,    # Vitals, labs, imaging (increased from 100)
+    "encounters": 10,      # Visits and encounters
+    "allergies": 10,       # Allergy intolerances
+    "diagnostic_reports": 10  # Diagnostic reports (if used)
 }
 
 class FHIRClient:
@@ -224,14 +224,16 @@ class FHIRClient:
         if args.category:
             form_data["category"] = args.category
 
-        # Handle date range
-        if args.dateFrom or args.dateTo:
-            date_range = []
-            if args.dateFrom:
-                date_range.append(f"ge{args.dateFrom}")
-            if args.dateTo:
-                date_range.append(f"le{args.dateTo}")
-            form_data["date"] = ",".join(date_range)
+        # Handle date range - FHIR server doesn't support combining ge/le in single parameter
+        # Use only the most restrictive filter or skip date filtering
+        if args.dateFrom and args.dateTo:
+            # If both provided, just use dateFrom (most recent data)
+            logger.warning(f"FHIR server doesn't support date ranges, using dateFrom only: {args.dateFrom}")
+            form_data["date"] = f"ge{args.dateFrom}"
+        elif args.dateFrom:
+            form_data["date"] = f"ge{args.dateFrom}"
+        elif args.dateTo:
+            form_data["date"] = f"le{args.dateTo}"
 
         # Smart code handling: Try exact match first, if no results and code provided, try without code
         if args.code:
@@ -259,15 +261,15 @@ class FHIRClient:
         }
         if args.type:
             params["type"] = args.type
-        
-        # Handle date range
-        if args.dateFrom or args.dateTo:
-            date_range = []
-            if args.dateFrom:
-                date_range.append(f"ge{args.dateFrom}")
-            if args.dateTo:
-                date_range.append(f"le{args.dateTo}")
-            params["date"] = ",".join(date_range)
+
+        # Handle date range - FHIR server doesn't support combining ge/le
+        if args.dateFrom and args.dateTo:
+            logger.warning(f"FHIR server doesn't support date ranges, using dateFrom only: {args.dateFrom}")
+            params["date"] = f"ge{args.dateFrom}"
+        elif args.dateFrom:
+            params["date"] = f"ge{args.dateFrom}"
+        elif args.dateTo:
+            params["date"] = f"le{args.dateTo}"
         
         data = await self._make_request("GET", "/Encounter", params)
         return self._format_encounters(data)
@@ -293,14 +295,14 @@ class FHIRClient:
         if args.code:
             form_data["code"] = args.code
 
-        # Handle date range
-        if args.dateFrom or args.dateTo:
-            date_range = []
-            if args.dateFrom:
-                date_range.append(f"ge{args.dateFrom}")
-            if args.dateTo:
-                date_range.append(f"le{args.dateTo}")
-            form_data["date"] = ",".join(date_range)
+        # Handle date range - FHIR server doesn't support combining ge/le
+        if args.dateFrom and args.dateTo:
+            logger.warning(f"FHIR server doesn't support date ranges, using dateFrom only: {args.dateFrom}")
+            form_data["date"] = f"ge{args.dateFrom}"
+        elif args.dateFrom:
+            form_data["date"] = f"ge{args.dateFrom}"
+        elif args.dateTo:
+            form_data["date"] = f"le{args.dateTo}"
 
         data = await self._make_request("POST", "/DiagnosticReport/_search", form_data=form_data)
         formatted_result = self._format_diagnostic_reports(data)
@@ -610,7 +612,14 @@ class FHIRClient:
                 value_type = "quantity"
             elif resource.get("valueString"):
                 # Text value (radiology reports, imaging results)
-                value = resource["valueString"]
+                raw_value = resource["valueString"]
+                # Truncate very long text values (e.g., RTF formatted reports) to prevent context overflow
+                MAX_VALUE_LENGTH = 2000  # characters
+                if len(raw_value) > MAX_VALUE_LENGTH:
+                    value = raw_value[:MAX_VALUE_LENGTH] + f"... [truncated, original length: {len(raw_value)} chars]"
+                    logger.info(f"Truncated long observation value from {len(raw_value)} to {MAX_VALUE_LENGTH} chars")
+                else:
+                    value = raw_value
                 value_type = "text"
             elif resource.get("component"):
                 # Component values (e.g., systolic/diastolic blood pressure)

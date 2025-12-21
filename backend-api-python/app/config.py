@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     MAX_CONVERSATION_HISTORY: int = 10
     
     # LangChain Settings
-    LANGCHAIN_MODEL: str = "moonshotai/kimi-k2-instruct"
+    LANGCHAIN_MODEL: str = "moonshotai/kimi-k2-instruct-0905"
     
     # Redis for production session storage (optional)
     REDIS_URL: Optional[str] = None

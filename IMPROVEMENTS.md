@@ -121,7 +121,7 @@ Query → LLM with Tools → Natural Tool Selection → Response
 3. Verify PYTHONUNBUFFERED is set: `docker-compose config`
 
 ### If tools aren't being called:
-1. Check the LLM model - use `llama-3.3-70b-versatile` for better tool use
+1. Check the LLM model - use `moonshotai/kimi-k2-instruct-0905` for better tool use
 2. Verify tools are being passed to Groq
 3. Check MCP server is healthy: http://localhost:8888/health
 

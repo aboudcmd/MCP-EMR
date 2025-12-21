@@ -27,7 +27,7 @@ class LangChainChatService:
         # Initialize LangChain Groq LLM with valid Groq model
         self.llm = ChatGroq(
             api_key=settings.GROQ_API_KEY,
-            model="moonshotai/kimi-k2-instruct",  # Valid Groq model with tool support
+            model="moonshotai/kimi-k2-instruct-0905",  # Valid Groq model with tool support
             temperature=0,  # Deterministic for medical data
             max_retries=3,
         )
@@ -130,7 +130,21 @@ class LangChainChatService:
                     response = "I cannot provide medical information without accessing the patient's records. Please let me retrieve the data from the EMR system."
                     
             except Exception as e:
-                logger.error(f"Agent execution error: {e}")
+                logger.error(f"Agent execution error: {e}", exc_info=True)
+
+                # Try to extract failed_generation details if available
+                if hasattr(e, 'args') and len(e.args) > 0:
+                    logger.error(f"Exception args: {e.args}")
+
+                # For OutputParserException, extract the observation
+                error_details = str(e)
+                if 'failed_generation' in error_details or 'Failed to call a function' in error_details:
+                    logger.error(f"LLM GENERATION ERROR - Full error details: {error_details}")
+                    # Try to get the result object if it exists
+                    import traceback
+                    tb_str = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
+                    logger.error(f"Full traceback:\n{tb_str}")
+
                 response = "I encountered an error while retrieving the medical data. Please try again."
         else:
             # Non-medical query - safe to respond without tools, include chat history
