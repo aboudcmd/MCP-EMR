@@ -13,6 +13,17 @@ from types_models import (
 
 logger = logging.getLogger(__name__)
 
+
+def _strip_nulls(obj):
+    """Recursively remove None/null values and empty lists from dicts to reduce token usage"""
+    if isinstance(obj, dict):
+        return {k: _strip_nulls(v) for k, v in obj.items()
+                if v is not None and v != [] and v != {}}
+    elif isinstance(obj, list):
+        return [_strip_nulls(item) for item in obj]
+    return obj
+
+
 # ⚙️ FHIR RESOURCE LIMITS - Control how many items are retrieved for each resource type
 # Increase these numbers if you need more results, but be aware of performance impact
 FHIR_LIMITS = {
@@ -315,11 +326,11 @@ class FHIRClient:
         """Format FHIR bundle response"""
         if not bundle.get("entry"):
             return {"total": 0, "results": []}
-        
-        return {
+
+        return _strip_nulls({
             "total": bundle.get("total", 0),
             "results": [self._format_patient(entry["resource"]) for entry in bundle["entry"]]
-        }
+        })
     
     def _format_patient(self, patient: Dict) -> Dict:
         """Format patient resource for Spark FHIR server"""
@@ -377,7 +388,7 @@ class FHIRClient:
                 if code_ext.get("valueCodeableConcept") and code_ext["valueCodeableConcept"].get("coding"):
                     citizenship = code_ext["valueCodeableConcept"]["coding"][0].get("code")
         
-        return {
+        return _strip_nulls({
             "id": patient.get("id"),
             "name": formatted_name,
             "birthDate": patient.get("birthDate"),
@@ -391,7 +402,7 @@ class FHIRClient:
             "maritalStatus": marital_status,
             "citizenship": citizenship,
             "country": patient.get("address", [{}])[0].get("country") if patient.get("address") else None,
-        }
+        })
     
     def _format_conditions(self, bundle: Dict) -> List[Dict]:
         """Format conditions bundle"""
@@ -422,15 +433,15 @@ class FHIRClient:
             # Handle onset - can be onsetDateTime or onsetString
             onset = resource.get("onsetDateTime") or resource.get("onsetString")
             
-            conditions.append({
+            conditions.append(_strip_nulls({
                 "id": resource.get("id"),
                 "code": code_display,
                 "clinicalStatus": clinical_status,
                 "onset": onset,
                 "onsetDateTime": resource.get("onsetDateTime"),  # Keep for backward compatibility
                 "recordedDate": resource.get("recordedDate"),
-            })
-        
+            }))
+
         return conditions
     
     def _format_medications(self, bundle: Dict) -> Dict:
@@ -539,7 +550,7 @@ class FHIRClient:
             if resource.get("requester"):
                 requester = resource["requester"].get("display")
             
-            medications.append({
+            medications.append(_strip_nulls({
                 "id": resource.get("id"),
                 "medication": med_text or "Unknown Medication",
                 "medicationCode": med_code,
@@ -556,8 +567,8 @@ class FHIRClient:
                 "dispenseRequest": resource.get("dispenseRequest"),
                 "substitution": resource.get("substitution"),
                 "note": resource.get("note")[0].get("text") if resource.get("note") else None
-            })
-        
+            }))
+
         return {
             "total": bundle.get("total", len(medications)),
             "medications": medications
@@ -665,7 +676,7 @@ class FHIRClient:
                 elif high:
                     reference_range = f"<{high} {unit}"
             
-            observations.append({
+            observations.append(_strip_nulls({
                 "id": resource.get("id"),
                 "code": obs_code,
                 "codeSystem": obs_system,
@@ -681,7 +692,7 @@ class FHIRClient:
                 "effectiveDate": resource.get("effectiveDate"),
                 "status": resource.get("status"),
                 "note": resource.get("note")[0].get("text") if resource.get("note") else None
-            })
+            }))
         
         # Sort observations by date (most recent first)
         try:
@@ -731,14 +742,14 @@ class FHIRClient:
             if resource.get("type") and len(resource["type"]) > 0:
                 enc_type = resource["type"][0].get("text")
             
-            encounters.append({
+            encounters.append(_strip_nulls({
                 "id": resource.get("id"),
                 "type": enc_type,
                 "status": resource.get("status"),
                 "period": resource.get("period"),
                 "serviceProvider": resource.get("serviceProvider", {}).get("display"),
-            })
-        
+            }))
+
         return encounters
     
     def _format_allergies(self, bundle: Dict) -> List[Dict]:
@@ -765,13 +776,13 @@ class FHIRClient:
                 elif resource["code"].get("text"):
                     substance = resource["code"]["text"]
 
-            allergies.append({
+            allergies.append(_strip_nulls({
                 "id": resource.get("id"),
                 "substance": substance,
                 "criticality": resource.get("criticality"),
                 "type": resource.get("type"),
                 "recordedDate": resource.get("recordedDate"),
-            })
+            }))
 
         return allergies
 
@@ -816,7 +827,7 @@ class FHIRClient:
                 for result_ref in resource["result"]:
                     results.append(result_ref.get("reference"))
 
-            diagnostic_reports.append({
+            diagnostic_reports.append(_strip_nulls({
                 "id": resource.get("id"),
                 "status": resource.get("status"),
                 "category": category,
@@ -829,7 +840,7 @@ class FHIRClient:
                 "results": results,
                 "conclusion": resource.get("conclusion"),
                 "conclusionCode": resource.get("conclusionCode"),
-            })
+            }))
 
         # Sort by effectiveDateTime (most recent first)
         try:
@@ -884,7 +895,7 @@ class FHIRClient:
                 encounters.append({"resource": resource})
         
         # Format each resource type using existing formatters
-        return {
+        return _strip_nulls({
             "patient": patient_data,
             "observations": self._format_observations({"entry": [{"resource": obs} for obs in observations]})["observations"],
             "conditions": self._format_conditions({"entry": conditions}),
@@ -892,4 +903,4 @@ class FHIRClient:
             "allergies": self._format_allergies({"entry": allergies}),
             "encounters": self._format_encounters({"entry": encounters}),
             "total_resources": len(bundle["entry"])
-        }
+        })
